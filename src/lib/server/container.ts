@@ -49,42 +49,59 @@ export interface Forge extends ForgeServices {
 	resetMock(): void;
 }
 
-/** Construit les clients réels à partir des réglages ; reconstruits quand les réglages changent. */
+/**
+ * Construit les clients réels à partir des réglages. Chaque client est mis en cache avec
+ * l'empreinte de sa configuration : un changement (URL, jeton, CA…) en reconstruit un
+ * neuf, avec son propre dispatcher TLS — jamais l'ancien.
+ */
 function liveApis(settings: SettingsService): () => ExternalApis {
-	let cache: Partial<ExternalApis> = {};
+	let cache: Partial<Record<keyof ExternalApis, { sig: string; client: object }>> = {};
 	settings.onChange(() => {
 		cache = {};
 	});
-	const lazy = <K extends keyof ExternalApis>(key: K, make: () => ExternalApis[K]): ExternalApis[K] =>
+	const lazy = <K extends keyof ExternalApis, C>(key: K, config: () => C, make: (c: C) => ExternalApis[K]): ExternalApis[K] =>
 		new Proxy({} as ExternalApis[K], {
 			get(_t, prop) {
-				try {
-					cache[key] ??= make();
-				} catch (err) {
-					// Client non configuré : chaque appel échoue proprement (promesse rejetée).
-					return () => Promise.reject(err);
+				const cfg = config();
+				const sig = JSON.stringify(cfg);
+				if (cache[key]?.sig !== sig) {
+					try {
+						cache[key] = { sig, client: make(cfg) as object };
+					} catch (err) {
+						// Client non configuré : chaque appel échoue proprement (promesse rejetée).
+						delete cache[key];
+						return () => Promise.reject(err);
+					}
 				}
-				const target = cache[key] as object;
+				const target = cache[key]?.client as object;
 				const v = Reflect.get(target, prop);
 				return typeof v === 'function' ? v.bind(target) : v;
 			}
 		});
 	const apis: ExternalApis = {
-		proxmox: lazy('proxmox', () => new ProxmoxClient({
-			url: settings.get('proxmox.url'),
-			node: settings.get('proxmox.node'),
-			tokenId: settings.get('proxmox.tokenId'),
-			tokenSecret: settings.get('proxmox.tokenSecret'),
-			caCert: settings.get('proxmox.caCert')
-		})),
-		github: lazy('github', () => new GithubClient(settings.get('github.token'))),
-		ovh: lazy('ovh', () => new OvhClient({
-			endpoint: settings.get('ovh.endpoint'),
-			appKey: settings.get('ovh.appKey'),
-			appSecret: settings.get('ovh.appSecret'),
-			consumerKey: settings.get('ovh.consumerKey')
-		})),
-		npm: lazy('npm', () => new NpmClient({ url: settings.get('npm.url'), identity: settings.get('npm.identity'), secret: settings.get('npm.secret') })),
+		proxmox: lazy(
+			'proxmox',
+			() => ({
+				url: settings.get('proxmox.url'),
+				node: settings.get('proxmox.node'),
+				tokenId: settings.get('proxmox.tokenId'),
+				tokenSecret: settings.get('proxmox.tokenSecret'),
+				caCert: settings.get('proxmox.caCert').trim()
+			}),
+			(c) => new ProxmoxClient(c)
+		),
+		github: lazy('github', () => settings.get('github.token'), (t) => new GithubClient(t)),
+		ovh: lazy(
+			'ovh',
+			() => ({
+				endpoint: settings.get('ovh.endpoint'),
+				appKey: settings.get('ovh.appKey'),
+				appSecret: settings.get('ovh.appSecret'),
+				consumerKey: settings.get('ovh.consumerKey')
+			}),
+			(c) => new OvhClient(c)
+		),
+		npm: lazy('npm', () => ({ url: settings.get('npm.url'), identity: settings.get('npm.identity'), secret: settings.get('npm.secret') }), (c) => new NpmClient(c)),
 		ssh: new SshClient(),
 		probe: new NetworkProbe(),
 		resolver: new DohResolver()

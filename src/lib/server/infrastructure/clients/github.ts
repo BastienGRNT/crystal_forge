@@ -6,13 +6,27 @@ import { Octokit } from '@octokit/rest';
 import { ExternalApiError } from '$lib/domain/errors';
 import type { GhDirEntry, GhRepo, GhRun, GhRunJob, GhRunner, GithubApi } from '$server/application/ports';
 
+/** Opérations qui exigent la permission « Administration » du jeton fine-grained. */
+const ADMIN_OPS = ["jeton d'enregistrement du runner", 'jeton de retrait du runner', 'retrait du runner', 'liste des runners'];
+
+/** Message d'erreur GitHub lisible, avec la permission manquante quand on peut la déduire. */
+export function explainGithubError(e: { status?: number; message: string; acceptedPermissions?: string }, what: string): string {
+	let msg = e.message;
+	if (e.status === 401) return `${what} : jeton invalide ou expiré`;
+	if (e.status === 403 && /not accessible/i.test(msg)) {
+		const needed = e.acceptedPermissions ? ` (GitHub attend : ${e.acceptedPermissions})` : '';
+		msg = ADMIN_OPS.some((op) => what.startsWith(op))
+			? `${msg}${needed} — le jeton fine-grained n'a pas la permission « Administration : Read and write » sur ce dépôt, ou le dépôt n'est pas inclus dans le jeton (Repository access). Corrigez-le dans GitHub → Settings → Developer settings → Fine-grained tokens.`
+			: `${msg}${needed} — vérifiez les permissions du jeton fine-grained et que le dépôt est inclus dans « Repository access »`;
+	}
+	return `${what} : ${msg}`;
+}
+
 function wrap(err: unknown, what: string): never {
-	const e = err as { status?: number; message?: string; response?: { data?: { message?: string } } };
-	const status = e.status;
-	let msg = e.response?.data?.message ?? e.message ?? String(err);
-	if (status === 401) msg = 'jeton invalide ou expiré';
-	if (status === 403 && /not accessible/i.test(msg)) msg = `${msg} — vérifiez les permissions du jeton fine-grained`;
-	throw new ExternalApiError('GitHub', `${what} : ${msg}`, status);
+	const e = err as { status?: number; message?: string; response?: { data?: { message?: string }; headers?: Record<string, string | undefined> } };
+	const message = e.response?.data?.message ?? e.message ?? String(err);
+	const acceptedPermissions = e.response?.headers?.['x-accepted-github-permissions'];
+	throw new ExternalApiError('GitHub', explainGithubError({ status: e.status, message, acceptedPermissions }, what), e.status);
 }
 
 function toRepo(r: {

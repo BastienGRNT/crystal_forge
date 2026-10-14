@@ -18,7 +18,7 @@ import type {
 	PveStorageStatus,
 	PveTaskStatus
 } from '$server/application/ports';
-import { httpRequest, parseJson, proxmoxDispatcher } from './http';
+import { httpRequest, isTlsError, parseJson, proxmoxDispatcher } from './http';
 
 export interface ProxmoxConfig {
 	url: string;
@@ -57,6 +57,14 @@ export class ProxmoxClient implements ProxmoxApi {
 				...(isBody ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {})
 			},
 			body: isBody ? qs.toString() : undefined
+		}).catch((err: unknown) => {
+			if (err instanceof ExternalApiError && isTlsError(err.message)) {
+				const hint = this.cfg.caCert.trim()
+					? 'certificat refusé avec le CA fourni : collez /etc/pve/pve-root-ca.pem (pas pve-ssl.pem) dans Réglages → Proxmox, ou videz le champ'
+					: 'certificat refusé alors qu’aucun CA n’est configuré (vérification TLS désactivée) : redémarrez Forge et signalez ce cas';
+				throw new ExternalApiError('Proxmox', `${err.message.replace(/^\[Proxmox\] /, '')} — ${hint}`);
+			}
+			throw err;
 		});
 		if (res.status >= 400) {
 			// Proxmox place souvent le message d'erreur dans le texte du statut HTTP.

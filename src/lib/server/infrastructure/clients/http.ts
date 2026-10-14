@@ -42,7 +42,8 @@ export async function httpRequest(system: string, url: string, opts: HttpOptions
 
 /**
  * Dispatcher TLS pour Proxmox : si le CA de Proxmox (pve-root-ca.pem) est fourni,
- * la chaîne de certificats est vérifiée (le nom d'hôte non, car on se connecte par IP).
+ * la chaîne de certificats est vérifiée, mais pas le nom d'hôte : pve-ssl.pem ne contient
+ * pas 10.10.10.1 dans ses SAN (seulement l'IP publique, le nom du nœud et localhost).
  * Sans CA : vérification désactivée (signalé dans « Tester les connexions »).
  */
 export function proxmoxDispatcher(caPem: string): Agent {
@@ -52,6 +53,12 @@ export function proxmoxDispatcher(caPem: string): Agent {
 			? { ca, rejectUnauthorized: true, checkServerIdentity: () => undefined }
 			: { rejectUnauthorized: false }
 	});
+}
+
+const TLS_ERRORS = /UNABLE_TO_VERIFY_LEAF_SIGNATURE|SELF_SIGNED_CERT|UNABLE_TO_GET_ISSUER_CERT|CERT_SIGNATURE_FAILURE|CERT_UNTRUSTED|ERR_TLS_CERT/;
+
+export function isTlsError(message: string): boolean {
+	return TLS_ERRORS.test(message);
 }
 
 export function parseJson<T>(system: string, text: string): T {

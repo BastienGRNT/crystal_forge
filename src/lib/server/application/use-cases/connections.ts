@@ -117,7 +117,7 @@ export class ConnectionTester {
 		items.push({ label: 'API', status: 'ok', detail: `Proxmox VE ${v.version} — ${settings.get('proxmox.url')}` });
 		items.push(
 			settings.get('proxmox.caCert').trim() || this.s.config.mode === 'mock'
-				? { label: 'TLS', status: 'ok', detail: 'Certificat vérifié avec le CA de Proxmox' }
+				? { label: 'TLS', status: 'ok', detail: 'Chaîne vérifiée avec le CA de Proxmox (nom d’hôte non vérifié : 10.10.10.1 absent des SAN de pve-ssl.pem)' }
 				: { label: 'TLS', status: 'warn', detail: 'Certificat non vérifié : collez pve-root-ca.pem dans les réglages' }
 		);
 		const node = await proxmox.nodeStatus();
@@ -216,10 +216,30 @@ export class ConnectionTester {
 		}
 		const repos = await github.api.listRepos();
 		items.push({ label: 'Dépôts accessibles', status: repos.length ? 'ok' : 'warn', detail: `${repos.length} dépôt(s)` });
+		// Administration : la lecture se vérifie sans rien créer (liste des runners) ; l'écriture
+		// (jeton d'enregistrement) ne peut l'être qu'au premier déploiement.
+		const projectRepo = this.s.repos.projects.list().find((p) => p.status !== 'deleted' && p.repoOwner.toLowerCase() === owner.toLowerCase());
+		const probe = projectRepo ? { owner: projectRepo.repoOwner, name: projectRepo.repoName } : repos.find((r) => !r.archived && r.owner.toLowerCase() === owner.toLowerCase());
+		if (probe) {
+			try {
+				await github.api.listRunners(probe.owner, probe.name);
+				items.push({
+					label: 'Administration',
+					status: 'ok',
+					detail: `Lecture vérifiée sur ${probe.owner}/${probe.name}. « Read and write » est nécessaire pour enregistrer le runner : vérifiable seulement au premier déploiement.`
+				});
+			} catch (err) {
+				items.push({
+					label: 'Administration',
+					status: 'error',
+					detail: `${probe.owner}/${probe.name} : ${errorMessage(err)} — donnez « Administration : Read and write » au jeton (jeton d'enregistrement du runner).`
+				});
+			}
+		}
 		items.push({
 			label: 'Permissions',
 			status: 'ok',
-			detail: 'Administration, Secrets, Variables, Actions, Contents, Workflows : vérifiées à la première utilisation sur un dépôt'
+			detail: 'Secrets, Variables, Actions, Contents, Workflows : vérifiées à la première utilisation sur un dépôt'
 		});
 		return `${me.login} — ${repos.length} dépôts`;
 	}
