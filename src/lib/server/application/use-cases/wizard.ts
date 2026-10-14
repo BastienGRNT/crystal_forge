@@ -3,11 +3,12 @@ import { candidateIps, nextFreeCtid } from '$lib/domain/allocation';
 import { detectDeployMode, normalizeWorkdir, repoPath, type DetectionResult } from '$lib/domain/compose-detect';
 import { analyzeCompose, type ComposeAnalysis } from '$lib/domain/compose-analysis';
 import { ENV_TEMPLATE_FILES, parseEnvTemplate, type EnvTemplate } from '$lib/domain/env-template';
-import { buildFqdn, isValidSubdomain, normalizeSubdomain } from '$lib/domain/domain-name';
+import { buildFqdn, isValidSubdomain, normalizeSubdomain, servesDomain } from '$lib/domain/domain-name';
 import { errorMessage } from '$lib/domain/errors';
 import { assessHostRam, SIZES, type SizeKey } from '$lib/domain/sizes';
 import { findSelfHostedWorkflows, WORKFLOW_PATH, type SelfHostedUsage } from '$lib/domain/workflow';
-import type { GhRepo } from '../ports';
+import { childrenOf } from '$lib/domain/repo-tree';
+import type { GhDirEntry, GhRepo } from '../ports';
 import type { ForgeServices } from '../services';
 
 export interface RepoInspection {
@@ -22,6 +23,9 @@ export interface RepoInspection {
 	compose: ComposeAnalysis | null;
 	envTemplate: EnvTemplate | null;
 }
+
+/** Contenu direct d'un dossier du dépôt ('' ou '.' : la racine). */
+type DirLister = (dir: string) => Promise<GhDirEntry[]>;
 
 const SKIP_DIRS = new Set(['.github', 'node_modules', '.git', 'docs', 'doc', '.vscode', '.idea', 'test', 'tests', 'scripts']);
 
@@ -44,34 +48,34 @@ export class WizardService {
 		const workdir = normalizeWorkdir(workdirInput);
 		const branch = repo.defaultBranch;
 
-		const root = await api.listDir(owner, name, '', branch);
-		const here = workdir === '.' ? root : await api.listDir(owner, name, workdir, branch);
-		const detection = detectDeployMode(here.filter((e) => e.type === 'file').map((e) => e.name));
+		const list = await this.#lister(owner, name, branch);
+		const [root, here] = await Promise.all([list(''), workdir === '.' ? null : list(workdir)]);
+		const detection = detectDeployMode((here ?? root).filter((e) => e.type === 'file').map((e) => e.name));
 
 		// Sous-dossiers candidats (un niveau) contenant un compose ou un Dockerfile.
 		const dirs = root.filter((e) => e.type === 'dir' && !SKIP_DIRS.has(e.name)).slice(0, 15);
-		const subdirs = (
-			await Promise.all(
+		const readCompose = async (): Promise<ComposeAnalysis | null> => {
+			if (detection.mode !== 'compose' || !detection.file) return null;
+			return analyzeCompose((await api.getFile(owner, name, repoPath(workdir, detection.file), branch))?.content ?? '');
+		};
+		// Lectures indépendantes : en parallèle.
+		const [subdirs, wfFiles, compose, envTemplate] = await Promise.all([
+			Promise.all(
 				dirs.map(async (d) => {
-					const entries = await api.listDir(owner, name, d.path, branch).catch(() => []);
+					const entries = await list(d.path).catch(() => []);
 					return { path: d.path, detection: detectDeployMode(entries.filter((e) => e.type === 'file').map((e) => e.name)) };
 				})
-			)
-		).filter((x) => x.detection.supported);
-
-		const wfEntries = await api.listDir(owner, name, '.github/workflows', branch);
-		const wfFiles = await Promise.all(
-			wfEntries
-				.filter((e) => e.type === 'file' && /\.ya?ml$/.test(e.name))
-				.map(async (e) => ({ path: e.path, content: (await api.getFile(owner, name, e.path, branch))?.content ?? '' }))
-		);
-
-		let compose: ComposeAnalysis | null = null;
-		if (detection.mode === 'compose' && detection.file) {
-			const content = (await api.getFile(owner, name, repoPath(workdir, detection.file), branch))?.content ?? '';
-			compose = analyzeCompose(content);
-		}
-		const envTemplate = await findEnvTemplate(api, owner, name, workdir, branch, here.map((e) => e.name));
+			).then((all) => all.filter((x) => x.detection.supported)),
+			list('.github/workflows').then((entries) =>
+				Promise.all(
+					entries
+						.filter((e) => e.type === 'file' && /\.ya?ml$/.test(e.name))
+						.map(async (e) => ({ path: e.path, content: (await api.getFile(owner, name, e.path, branch))?.content ?? '' }))
+				)
+			),
+			readCompose(),
+			findEnvTemplate(api, owner, name, workdir, branch, list)
+		]);
 
 		const linked = this.s.repos.projects.list().find((p) => `${p.repoOwner}/${p.repoName}`.toLowerCase() === fullName.toLowerCase());
 		return {
@@ -88,9 +92,20 @@ export class WizardService {
 		};
 	}
 
+	/**
+	 * Listing des dossiers du dépôt : l'arborescence complète en UN appel (git/trees),
+	 * ou dossier par dossier si GitHub la tronque (très gros dépôt).
+	 */
+	async #lister(owner: string, name: string, branch: string): Promise<DirLister> {
+		const api = this.s.github.api;
+		const tree = await api.listTree(owner, name, branch).catch(() => null);
+		if (tree && !tree.truncated) return async (dir) => childrenOf(tree.entries, dir);
+		return (dir) => api.listDir(owner, name, dir === '.' ? '' : dir, branch);
+	}
+
 	async zones(): Promise<{ zones: string[]; error: string | null }> {
 		try {
-			return { zones: await this.s.dns.listZones(), error: null };
+			return { zones: await this.s.dns.zones(), error: null };
 		} catch (err) {
 			return { zones: [], error: errorMessage(err) };
 		}
@@ -106,7 +121,7 @@ export class WizardService {
 		if (this.s.repos.domains.byFqdn(fqdn)) reasons.push('Déjà utilisé par un projet Forge');
 		try {
 			const hosts = await this.s.proxy.listHosts();
-			const h = hosts.find((x) => x.domainNames.includes(fqdn));
+			const h = hosts.find((x) => servesDomain(x.domainNames, fqdn));
 			if (h) reasons.push(`Proxy host NPM existant → ${h.forwardHost}:${h.forwardPort}`);
 		} catch (err) {
 			warnings.push(`NPM : ${errorMessage(err)}`);
@@ -129,8 +144,9 @@ export class WizardService {
 	/** Prochain CTID / IP probables et impact RAM (sans ping : indicatif). */
 	async preview(size: SizeKey) {
 		const { proxmox, settings, repos } = this.s;
-		const [node, guests] = await Promise.all([proxmox.nodeStatus(), proxmox.guests()]);
-		const used = await proxmox.usedIps(guests);
+		// Indicatif : l'étape « Conteneur » refait l'allocation sur l'état réel.
+		const [node, guests, guestIps] = await Promise.all([proxmox.nodeStatus(), proxmox.guests(), proxmox.guestIps()]);
+		const used = [...guestIps.values()].flat().map((ip) => ({ ip }));
 		const reserved = repos.projects.reservedAllocations();
 		const ctid = nextFreeCtid(
 			guests.map((g) => g.vmid),
@@ -154,11 +170,11 @@ export async function findEnvTemplate(
 	repo: string,
 	workdir: string,
 	branch: string,
-	names?: string[]
+	list: DirLister = (dir) => api.listDir(owner, repo, dir === '.' ? '' : dir, branch)
 ): Promise<EnvTemplate | null> {
 	const dirs = workdir === '.' ? ['.'] : [workdir, '.'];
 	for (const dir of dirs) {
-		const listing = dir === workdir && names ? names : (await api.listDir(owner, repo, dir === '.' ? '' : dir, branch).catch(() => [])).map((e) => e.name);
+		const listing = (await list(dir).catch(() => [])).map((e) => e.name);
 		const file = ENV_TEMPLATE_FILES.find((f) => listing.includes(f));
 		if (!file) continue;
 		const path = repoPath(dir, file);
@@ -166,28 +182,4 @@ export async function findEnvTemplate(
 		if (content !== undefined) return parseEnvTemplate(path, content);
 	}
 	return null;
-}
-
-/** Noms des services d'un docker-compose (lecture légère, sans dépendre du schéma complet). */
-export function parseComposeServices(content: string): string[] {
-	const lines = content.split('\n');
-	const out: string[] = [];
-	let inServices = false;
-	let indent = -1;
-	for (const line of lines) {
-		if (/^services:\s*$/.test(line)) {
-			inServices = true;
-			continue;
-		}
-		if (inServices) {
-			if (/^\S/.test(line) && line.trim() !== '') break;
-			const m = /^(\s+)([A-Za-z0-9_.-]+):\s*$/.exec(line);
-			if (m) {
-				const len = (m[1] ?? '').length;
-				if (indent === -1) indent = len;
-				if (len === indent) out.push(m[2] as string);
-			}
-		}
-	}
-	return out;
 }

@@ -37,6 +37,28 @@ export function classifyEnvKey(key: string): EnvVarKind {
 	return 'plain';
 }
 
+/** Mot de passe d'une URL de connexion (postgres://user:mdp@hôte…). */
+const URL_PASSWORD_RE = /^[a-z][a-z0-9+.-]*:\/\/[^:/@\s]+:([^@\s]+)@/i;
+
+/**
+ * Valeurs d'un .env à masquer dans les logs : celles des clés sensibles, le mot de passe
+ * des URL de connexion et les valeurs qui ressemblent à un secret généré (longues, lettres
+ * et chiffres). Les valeurs ordinaires (« production », « postgres »…) restent lisibles.
+ */
+export function sensitiveEnvValues(text: string): string[] {
+	const out: string[] = [];
+	for (const { key, value } of parseEnv(text).entries) {
+		const v = value.trim();
+		if (!v) continue;
+		const urlPassword = URL_PASSWORD_RE.exec(v)?.[1];
+		if (urlPassword) out.push(urlPassword);
+		// Une URL n'est pas un secret en soi : son éventuel mot de passe est extrait ci-dessus.
+		const looksGenerated = v.length >= 16 && !/\s/.test(v) && /[A-Za-z]/.test(v) && /\d/.test(v) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(v);
+		if (SECRET_RE.test(key) || looksGenerated) out.push(v);
+	}
+	return out;
+}
+
 export function isPlaceholder(value: string): boolean {
 	return value.trim() === '' || PLACEHOLDER_RE.test(value.trim());
 }

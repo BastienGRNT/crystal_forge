@@ -4,6 +4,7 @@
  * Les cas d'usage n'utilisent jamais ces ports directement pour écrire : ils passent
  * par les passerelles (gateways) qui appliquent le garde d'écriture.
  */
+import type { TreeEntry } from '$lib/domain/repo-tree';
 
 // --- Proxmox ----------------------------------------------------------------------
 
@@ -179,6 +180,8 @@ export interface GithubApi {
 	listRepos(): Promise<GhRepo[]>;
 	getRepo(owner: string, repo: string): Promise<GhRepo>;
 	listDir(owner: string, repo: string, path: string, ref?: string): Promise<GhDirEntry[]>;
+	/** Arborescence complète d'une branche en un appel ; truncated : dépôt trop gros, lister dossier par dossier. */
+	listTree(owner: string, repo: string, ref: string): Promise<{ entries: TreeEntry[]; truncated: boolean }>;
 	getFile(owner: string, repo: string, path: string, ref?: string): Promise<{ content: string; sha: string } | null>;
 	listRunners(owner: string, repo: string): Promise<GhRunner[]>;
 	listWorkflowRuns(owner: string, repo: string, workflowFile: string, perPage?: number): Promise<GhRun[]>;
@@ -188,7 +191,6 @@ export interface GithubApi {
 	getRunJobs(owner: string, repo: string, runId: number): Promise<GhRunJob[]>;
 	getJobLogs(owner: string, repo: string, jobId: number): Promise<string>;
 	getPublicKey(owner: string, repo: string): Promise<{ keyId: string; key: string }>;
-	getSecretMeta(owner: string, repo: string, name: string): Promise<{ updatedAt: string } | null>;
 	listVariables(owner: string, repo: string): Promise<{ name: string; value: string }[]>;
 	/** Dernier commit d'une branche. */
 	latestCommit(owner: string, repo: string, branch: string): Promise<{ sha: string; message: string; date: string | null }>;
@@ -196,7 +198,6 @@ export interface GithubApi {
 	downloadTarball(owner: string, repo: string, ref: string): Promise<Buffer>;
 
 	createRegistrationToken(owner: string, repo: string): Promise<{ token: string; expiresAt: string }>;
-	createRemoveToken(owner: string, repo: string): Promise<{ token: string; expiresAt: string }>;
 	deleteRunner(owner: string, repo: string, runnerId: number): Promise<void>;
 	putSecret(owner: string, repo: string, name: string, encryptedValue: string, keyId: string): Promise<void>;
 	deleteSecret(owner: string, repo: string, name: string): Promise<void>;
@@ -315,6 +316,8 @@ export interface SshTarget {
 	privateKey: string;
 	/** Empreinte attendue (TOFU) ; null = première connexion, l'empreinte est renvoyée. */
 	expectedHostKey: string | null;
+	/** 22 par défaut. */
+	port?: number;
 }
 
 export interface SshResult {

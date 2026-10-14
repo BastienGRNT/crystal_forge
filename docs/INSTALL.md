@@ -31,7 +31,7 @@ bash /root/crystal_forge/infra/bootstrap.sh
 1. **Tailscale** : ouvrir le lien de connexion affiché par 00b, puis approuver la route 10.10.10.0/24 dans la console (Machines → l'hôte → *Edit route settings*).
 2. **NPM** (`http://10.10.10.2:81`, via Tailscale) : créer le compte administrateur, puis le compte « Forge » non admin (§4).
 3. **Forge** (`http://10.10.10.15:3000/setup`) : créer le compte admin avec le jeton d'installation, affiché par bootstrap.
-4. **Forge → Réglages** : jeton GitHub (§2), clés OVH (§3), compte NPM Forge (§4). Proxmox et la clé SSH sont déjà configurés.
+4. **Forge → Réglages** : jeton GitHub et propriétaire des dépôts (§2), **IP publique** du serveur (Réseau), clés OVH (§3), compte NPM Forge (§4). Proxmox, les CT de prod protégés et la clé SSH sont déjà configurés.
 5. **Réglages → Tester les connexions**, puis **Santé du serveur** : tout doit être vert, et la matrice doit montrer que les CT de prod sont en lecture seule.
 6. Premier déploiement **en DRY-RUN** (par défaut), lecture du journal, puis `DRY_RUN=false` (§6).
 
@@ -163,7 +163,7 @@ Ces privilèges ont été vérifiés dans le source de `pve-container` (PVE 9) :
 
 À la fin, le script vérifie que le jeton n'a, sur 100, 101 et 401-404, **aucun privilège autre que `*.Audit`** : tous les privilèges sont contrôlés, pas seulement quelques-uns, et une lecture impossible arrête le script. Il vérifie aussi `Pool.Audit` sur le pool. Il affiche ensuite le secret du jeton (une seule fois) et le certificat CA de Proxmox, à coller dans Réglages → Proxmox.
 
-Lancé par bootstrap (`FORGE_DELIVER_CT=150`), le script **remet le jeton et le CA directement à Forge**, sans les afficher. Il écrit `provision.json` dans le CT 150 en passant par l'entrée standard de `pct exec`, jamais en argument. Forge importe ces réglages chiffrés dans les 10 s, puis supprime le fichier. Seules les clés `proxmox.*` sont acceptées.
+Lancé par bootstrap (`FORGE_DELIVER_CT=150`), le script **remet le jeton et le CA directement à Forge**, sans les afficher, ainsi que la liste des CT de production (`PROD_CTIDS` de `infra/lib.sh`, seule source de cette liste, remise à chaque lancement même sans nouveau jeton). Il écrit `provision.json` dans le CT 150 en passant par l'entrée standard de `pct exec`, jamais en argument. Forge importe ces réglages chiffrés dans les 10 s, puis supprime le fichier. Seules les clés `proxmox.*` et `safety.protectedCtids` sont acceptées.
 
 Lancé à la main, pour ne pas afficher le secret dans le terminal (historique, enregistrement de session), écrivez-le dans un fichier en mode 600, puis supprimez ce fichier après l'avoir collé :
 
@@ -292,7 +292,7 @@ GitHub → Settings → Developer settings → **Fine-grained tokens** → *Gene
 
 Pour le bouton **Mettre à jour Forge**, le jeton doit aussi pouvoir lire le dépôt `crystal_forge` (*Contents : Read*, déjà couvert si le dépôt est inclus).
 
-Collez le jeton (`github_pat_…`) dans Réglages → GitHub.
+Collez le jeton (`github_pat_…`) dans Réglages → GitHub, avec le **propriétaire des dépôts** (le *Resource owner* ci-dessus) : il est vide par défaut et aucun projet ne peut être créé sans lui.
 
 ## 3. Clés OVH
 
@@ -308,7 +308,7 @@ https://eu.api.ovh.com/createToken/?GET=/domain/zone&GET=/auth/currentCredential
 
 - **Ne donnez jamais `POST /domain/zone/*`** : cette règle couvre aussi `/reset`, qui vide la zone, et `/import`. Le test de connexion signale ce genre de règle.
 - Le `DELETE` sur `/record/*` est optionnel. Sans lui, le rollback et le retrait d'un domaine vous indiqueront l'enregistrement à supprimer à la main.
-- Forge ne crée que des enregistrements **A** vers `51.68.180.212`, et seulement si aucun A, AAAA ou CNAME n'existe déjà pour ce nom.
+- Forge ne crée que des enregistrements **A** vers l'IP publique du serveur (Réglages → Réseau, obligatoire), et seulement si aucun A, AAAA ou CNAME n'existe déjà pour ce nom.
 
 Reportez l'Application key, l'Application secret et la Consumer key dans Réglages → OVH.
 

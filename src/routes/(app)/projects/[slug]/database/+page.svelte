@@ -33,8 +33,16 @@
 	import { DB_LABEL, isSqlDbKind, type DbKind } from '$lib/domain/compose-analysis';
 	import { bytes, duration } from '$lib/format';
 	import { cn } from '$lib/utils';
+	import { deferred } from '$lib/deferred.svelte';
 
 	let { data, form } = $props();
+	// Infos, tables et sauvegardes (SSH) arrivent après la page ; gardées pendant « Actualiser ».
+	const infoD = deferred(() => data.info ?? Promise.resolve(null));
+	const tablesD = deferred(() => data.tables ?? Promise.resolve(null));
+	const backupsD = deferred(() => data.backups ?? Promise.resolve(null));
+	const infoR = $derived(infoD.value);
+	const tablesR = $derived(tablesD.value);
+	const backupsR = $derived(backupsD.value);
 	const p = $derived(data.project);
 	const PAGE = 100;
 
@@ -82,7 +90,7 @@
 	const needsConfirm = $derived(!!(form && 'needsConfirm' in form && form.needsConfirm));
 
 	function sample(t: { schema: string; name: string }) {
-		const q = data.info?.value?.kind === 'postgres' ? `"${t.schema}"."${t.name}"` : `\`${t.name}\``;
+		const q = infoR?.value?.kind === 'postgres' ? `"${t.schema}"."${t.name}"` : `\`${t.name}\``;
 		sql = `SELECT *\nFROM ${q}\nLIMIT 50;`;
 		view = 'sql';
 	}
@@ -95,7 +103,7 @@
 	let restoreConfirm = $state('');
 	const reasonLabel: Record<string, string> = { import: 'Importée', manual: 'Manuelle', 'pre-deploy': 'Avant déploiement', 'pre-restore': 'Avant restauration', 'pre-query': 'Avant requête' };
 
-	const info = $derived(data.info?.value ?? null);
+	const info = $derived(infoR?.value ?? null);
 	const tunnel = $derived(
 		info && info.containerIp && p.ip ? `ssh -N -L 1${info.port}:${info.containerIp}:${info.port} root@${p.ip}` : null
 	);
@@ -137,8 +145,10 @@
 			{#snippet actions()}
 				<Button variant="ghost" size="sm" onclick={() => invalidate('forge:database')}><RefreshCw /> Actualiser</Button>
 			{/snippet}
-			{#if data.info?.error}
-				<Alert.Root variant="destructive"><TriangleAlert /><Alert.Description>{data.info.error}</Alert.Description></Alert.Root>
+			{#if infoR?.error}
+				<Alert.Root variant="destructive"><TriangleAlert /><Alert.Description>{infoR.error}</Alert.Description></Alert.Root>
+			{:else if !infoR}
+				<p class="flex items-center gap-2 text-sm text-muted-foreground"><Spinner /> Lecture de la base…</p>
 			{:else if info}
 				<div class="grid gap-x-8 md:grid-cols-2">
 					<dl class="divide-y">
@@ -175,11 +185,13 @@
 		<!-- Tables + données / console -->
 		<div class="grid gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
 			<SectionCard title="Tables" icon={Table2} bodyClass="p-0">
-				{#if data.tables?.error}
-					<p class="p-4 text-sm text-danger">{data.tables.error}</p>
+				{#if tablesR?.error}
+					<p class="p-4 text-sm text-danger">{tablesR.error}</p>
+				{:else if !tablesR}
+					<p class="flex items-center gap-2 p-4 text-sm text-muted-foreground"><Spinner /> Tables…</p>
 				{:else}
 					<ul class="scrollbar-thin max-h-[32rem] divide-y overflow-auto text-sm">
-						{#each data.tables?.value ?? [] as t (`${t.schema}.${t.name}`)}
+						{#each tablesR.value ?? [] as t (`${t.schema}.${t.name}`)}
 							<li>
 								<button
 									type="button"
@@ -332,11 +344,13 @@
 					{form.imported.simulated ? '[DRY-RUN] Import simulé' : `Importé : ${form.imported.name}`} — cliquez sur <RotateCcw class="inline size-3.5" /> pour le restaurer.
 				</p>
 			{/if}
-			{#if data.backups?.error}
-				<p class="p-4 text-sm text-danger">{data.backups.error}</p>
+			{#if backupsR?.error}
+				<p class="p-4 text-sm text-danger">{backupsR.error}</p>
+			{:else if !backupsR}
+				<p class="flex items-center gap-2 p-4 text-sm text-muted-foreground"><Spinner /> Sauvegardes…</p>
 			{:else}
 				<ul class="divide-y text-sm">
-					{#each data.backups?.value ?? [] as b (b.name)}
+					{#each backupsR.value ?? [] as b (b.name)}
 						<li class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
 							<span class="min-w-0 flex-1 truncate font-mono text-[13px]">{b.name}</span>
 							<Badge variant="outline">{reasonLabel[b.reason] ?? b.reason}</Badge>

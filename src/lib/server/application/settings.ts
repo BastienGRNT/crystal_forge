@@ -23,7 +23,8 @@ interface Def {
 
 export const SETTING_DEFS = {
 	'proxmox.url': { default: 'https://10.10.10.1:8006' },
-	'proxmox.node': { default: 'ns3125740' },
+	/** Rempli par infra/02 (provision.json). */
+	'proxmox.node': { default: '' },
 	'proxmox.tokenId': { default: 'forge@pve!forge' },
 	'proxmox.tokenSecret': { default: '', secret: true },
 	'proxmox.caCert': { default: '' },
@@ -34,10 +35,12 @@ export const SETTING_DEFS = {
 	'proxmox.bridge': { default: 'nat' },
 	'network.gateway': { default: '10.10.10.1' },
 	'network.cidr': { default: '24' },
-	'network.publicIp': { default: '51.68.180.212' },
+	/** Obligatoire : cible des enregistrements A. */
+	'network.publicIp': { default: '' },
 	'network.ipStart': { default: '10.10.10.60' },
 	'network.ipEnd': { default: '10.10.10.99' },
-	'network.reservedIps': { default: '10.10.10.1,10.10.10.2,10.10.10.15,10.10.10.50,10.10.10.200' },
+	/** Passerelle, NPM et Forge (infra/00a, 00c, 04) : à compléter avec les IP propres à l'hôte. */
+	'network.reservedIps': { default: '10.10.10.1,10.10.10.2,10.10.10.15' },
 	'network.npmIp': { default: '10.10.10.2' },
 	'network.forgeIp': { default: '10.10.10.15' },
 	/** DNS des CT de projet (IP séparées par des espaces). Vide = hérité de l'hôte. */
@@ -46,8 +49,10 @@ export const SETTING_DEFS = {
 	'firewall.enabled': { default: 'true' },
 	'ctid.min': { default: '500' },
 	'ctid.max': { default: '599' },
-	'safety.protectedCtids': { default: '100,101,401,402,403,404' },
-	'github.owner': { default: 'BastienGRNT' },
+	/** Rempli par infra/02 depuis PROD_CTIDS (infra/lib.sh), la source unique. */
+	'safety.protectedCtids': { default: '' },
+	/** Obligatoire : seuls les dépôts de ce compte sont utilisables. */
+	'github.owner': { default: '' },
 	'github.token': { default: '', secret: true },
 	'ovh.endpoint': { default: 'https://eu.api.ovh.com/1.0' },
 	'ovh.appKey': { default: '' },
@@ -127,12 +132,6 @@ export class SettingsService {
 			if (v === '' && secret) continue; // un champ secret vide = « ne pas changer »
 			this.store.set(k, secret ? this.cipher.encrypt(v, `settings:${k}`) : v, secret);
 		}
-		this.#cache = null;
-		this.#listeners.forEach((fn) => fn());
-	}
-
-	clear(key: SettingKey): void {
-		this.store.delete(key);
 		this.#cache = null;
 		this.#listeners.forEach((fn) => fn());
 	}

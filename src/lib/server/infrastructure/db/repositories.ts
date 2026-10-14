@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne } from 'drizzle-orm';
 import type { Db } from './client';
 import {
 	admin,
@@ -304,8 +304,5 @@ export class AuthRepo {
 	}
 	purgeExpired(): void {
 		this.db.delete(sessions).where(lt(sessions.expiresAt, ts())).run();
-	}
-	count(): number {
-		return this.db.select({ n: sql<number>`count(*)` }).from(sessions).get()?.n ?? 0;
 	}
 }

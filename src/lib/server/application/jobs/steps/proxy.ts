@@ -1,4 +1,5 @@
 /** Étape 6 — Proxy host NPM + certificat Let's Encrypt, un par domaine. */
+import { servesDomain } from '$lib/domain/domain-name';
 import type { StepDefinition } from '../types';
 import { requireIp } from './common';
 import { targetDomains } from './dns';
@@ -21,13 +22,14 @@ export const proxyStep: StepDefinition = {
 			ctx.log('info', `Email Let's Encrypt non défini dans Réglages : NPM utilisera celui du compte (${email}).`);
 		}
 
-		const hosts = await proxy.listHosts();
+		// État réel (pas le cache d'affichage) : un proxy host créé hors Forge doit être vu.
+		const hosts = await proxy.api.listProxyHosts();
 		for (const d of domains) {
 			if (d.status === 'active') {
 				ctx.log('info', `${d.fqdn} : proxy host déjà actif.`);
 				continue;
 			}
-			const existing = hosts.find((h) => h.domainNames.map((x) => x.toLowerCase()).includes(d.fqdn));
+			const existing = hosts.find((h) => servesDomain(h.domainNames, d.fqdn));
 			if (existing) {
 				if (repos.resources.findActive('npm_proxy_host', String(existing.id))) {
 					ctx.log('info', `${d.fqdn} : proxy host #${existing.id} déjà créé par Forge.`);

@@ -11,7 +11,8 @@ FORGE_BRIDGE="nat"
 FORGE_GATEWAY="10.10.10.1"
 FORGE_STORAGE="local"
 FORGE_OSTEMPLATE="local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst"
-# CT de production : aucun script ne doit les modifier.
+# CT de production : aucun script ne doit les modifier. Source unique : infra/02 remet
+# cette liste à Forge (réglage safety.protectedCtids).
 PROD_CTIDS=(100 101 401 402 403 404)
 
 # --- Affichage -----------------------------------------------------------------

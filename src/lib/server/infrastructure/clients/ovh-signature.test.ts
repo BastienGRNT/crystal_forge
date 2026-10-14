@@ -62,4 +62,10 @@ describe('règles OVH', () => {
 		expect(url).toContain('DELETE=/domain/zone/bastiengrnt.fr/record/*');
 		expect(url).not.toContain('POST=/domain/zone/*');
 	});
+	it('sans zone connue, couvre toutes les zones sans règle dangereuse', () => {
+		const url = ovhCreateTokenUrl('https://eu.api.ovh.com/1.0', [], false);
+		expect(url).toContain('POST=/domain/zone/*/record&');
+		const rules = url.split('?')[1]!.split('&').map((p) => ({ method: p.split('=')[0]!, path: p.slice(p.indexOf('=') + 1) }));
+		expect(dangerousOvhRules(rules)).toEqual([]);
+	});
 });

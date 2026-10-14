@@ -169,6 +169,9 @@ export class JobEngine {
 				console.error('[forge] erreur inattendue du moteur de jobs', err);
 				this.s.repos.jobs.setStatus(next.id, 'failed', { error: errorMessage(err) });
 				this.#emitStatus(next.id);
+			} finally {
+				// Sinon isBusy() resterait vrai (mise à jour de Forge et reset du mock bloqués).
+				this.#current = null;
 			}
 		}
 	}
@@ -235,8 +238,13 @@ export class JobEngine {
 			if (step.status === 'succeeded' || step.status === 'skipped') continue;
 			const sd = STEPS[step.key];
 			if (!sd) {
-				this.s.repos.jobs.setStep(step.id, 'failed', { error: `Étape inconnue : ${step.key}` });
-				continue;
+				// Le job s'arrête : les étapes suivantes peuvent dépendre de celle-ci.
+				const error = `Étape inconnue : ${step.key}`;
+				this.s.repos.jobs.setStep(step.id, 'failed', { error });
+				this.s.repos.jobs.setStatus(row.id, 'failed', { error });
+				this.#log(row.id, step.key, 'error', `✖ ${error}`);
+				this.#emitStatus(row.id);
+				return;
 			}
 			const state = parse<Record<string, unknown>>(step.state, {});
 			delete state.pendingInput;
@@ -271,7 +279,6 @@ export class JobEngine {
 					this.s.repos.jobs.setStatus(row.id, 'awaiting_input');
 					this.#log(row.id, step.key, 'warn', `⏸ ${err.input.title}`);
 					this.#emitStatus(row.id);
-					this.#current = null;
 					return;
 				}
 				const msg = err instanceof JobInterrupted ? 'Interrompu par l’utilisateur' : errorMessage(err);
@@ -286,7 +293,6 @@ export class JobEngine {
 					}
 				}
 				this.#emitStatus(row.id);
-				this.#current = null;
 				return;
 			}
 		}
@@ -299,6 +305,5 @@ export class JobEngine {
 		}
 		this.#log(row.id, null, 'success', isRollback ? 'Rollback terminé.' : 'Job terminé avec succès.');
 		this.#emitStatus(row.id);
-		this.#current = null;
 	}
 }

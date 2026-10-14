@@ -35,6 +35,7 @@ export class ProxmoxClient implements ProxmoxApi {
 
 	constructor(private readonly cfg: ProxmoxConfig) {
 		if (!cfg.tokenSecret) throw new ExternalApiError('Proxmox', 'jeton API non configuré (Réglages → Proxmox)');
+		if (!cfg.node) throw new ExternalApiError('Proxmox', 'nœud non configuré (Réglages → Proxmox)');
 		this.#dispatcher = proxmoxDispatcher(cfg.caCert);
 	}
 

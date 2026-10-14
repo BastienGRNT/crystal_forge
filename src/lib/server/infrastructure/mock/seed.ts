@@ -27,7 +27,16 @@ SESSION_SECRET=une-valeur-tres-secrete-de-demo
  * réglages sont conservés).
  */
 export function seedMockDatabase(s: ForgeServices, db: Db): void {
-	const { repos, cipher } = s;
+	const { repos, cipher, settings } = s;
+	// Réglages propres à une installation, alignés sur le monde simulé (ceux déjà saisis sont gardés).
+	const demoSettings = {
+		'network.publicIp': '51.68.180.212',
+		'proxmox.node': 'ns3125740',
+		'github.owner': 'BastienGRNT',
+		'safety.protectedCtids': '100,101,401,402,403,404',
+		'network.reservedIps': '10.10.10.1,10.10.10.2,10.10.10.15,10.10.10.50,10.10.10.200'
+	} as const;
+	settings.set(Object.fromEntries(Object.entries(demoSettings).filter(([k]) => !settings.has(k as keyof typeof demoSettings))));
 	db.delete(jobLogs).run();
 	db.delete(resources).run();
 	db.delete(jobSteps).run();

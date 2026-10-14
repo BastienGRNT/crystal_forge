@@ -2,8 +2,8 @@
  * Échanges automatiques avec les scripts infra/ via le dossier partagé du CT 150
  * (/opt/forge/updates, monté sur /updates) :
  *   • forge.pub : clé publique SSH de Forge, lue par bootstrap.sh pour créer le template 900 ;
- *   • provision.json : réglages Proxmox déposés par infra/02 (jeton, CA). Importés dans
- *     les réglages chiffrés puis supprimés. Seules les clés proxmox.* listées sont acceptées.
+ *   • provision.json : réglages déposés par infra/02 (jeton, CA, CT de production protégés).
+ *     Importés dans les réglages chiffrés puis supprimés. Seules les clés listées sont acceptées.
  */
 import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -13,7 +13,7 @@ export const PROVISION_FILE = 'provision.json';
 export const PUBLIC_KEY_FILE = 'forge.pub';
 
 /** Réglages qu'un script de l'hôte peut fournir : rien d'autre n'est importé. */
-const PROVISIONABLE: SettingKey[] = ['proxmox.url', 'proxmox.node', 'proxmox.tokenId', 'proxmox.tokenSecret', 'proxmox.caCert'];
+const PROVISIONABLE: SettingKey[] = ['proxmox.url', 'proxmox.node', 'proxmox.tokenId', 'proxmox.tokenSecret', 'proxmox.caCert', 'safety.protectedCtids'];
 
 async function isDir(path: string): Promise<boolean> {
 	try {

@@ -21,7 +21,7 @@ async function teardownResource(ctx: StepContext, r: ResourceRow): Promise<void>
 	switch (r.type) {
 		case 'pve_ct': {
 			const vmid = Number(r.externalId);
-			const g = (await proxmox.guests()).find((x) => x.vmid === vmid);
+			const g = (await proxmox.api.guests()).find((x) => x.vmid === vmid);
 			if (!g) {
 				ctx.log('info', `CT ${vmid} déjà absent.`);
 				break;
@@ -169,7 +169,7 @@ export const backupStep: StepDefinition = {
 		await ctx.services.proxmox.waitTask(upid, { timeoutMs: 60 * 60_000, onLine: (l) => ctx.log('debug', l) });
 		ctx.state.done = true;
 		ctx.save();
-		const last = ctx.dryRun ? null : (await ctx.services.proxmox.listBackups(p.ctid))[0];
+		const last = ctx.dryRun ? null : (await ctx.services.proxmox.listBackups(p.ctid, { fresh: true }))[0];
 		ctx.log('success', last ? `Sauvegarde créée : ${last.volid} (${(last.size / 1024 ** 2).toFixed(0)} Mo).` : 'Sauvegarde terminée.');
 	}
 };

@@ -16,12 +16,18 @@ export const load: PageServerLoad = async ({ params, depends }) => {
 	depends('forge:database');
 	const f = forge();
 	const p = f.projects.get(params.slug);
-	const candidates = await settle(f.database.candidates(p));
 	if (!p.dbService || !isSqlDbKind(p.dbKind)) {
-		return { configured: false as const, candidates, info: null, tables: null, backups: null };
+		// Le compose (GitHub) n'est lu que pour choisir la base.
+		return { configured: false as const, candidates: await settle(f.database.candidates(p)), info: null, tables: null, backups: null };
 	}
-	const [info, tables, backups] = await Promise.all([settle(f.database.info(p)), settle(f.database.tables(p)), settle(f.database.backups(p))]);
-	return { configured: true as const, candidates, info, tables, backups };
+	// Lectures par SSH : la page s'affiche tout de suite, elles arrivent ensuite.
+	return {
+		configured: true as const,
+		candidates: { value: [], error: null },
+		info: settle(f.database.info(p)),
+		tables: settle(f.database.tables(p)),
+		backups: settle(f.database.backups(p))
+	};
 };
 
 export const actions: Actions = {

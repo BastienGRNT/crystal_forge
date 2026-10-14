@@ -40,6 +40,8 @@ export interface FakeTask {
 export interface FakeRunStep {
 	name: string;
 	durationMs: number;
+	/** Étape conditionnelle (if: vars.…) dont la variable est vide : ignorée par GitHub. */
+	skipped?: boolean;
 }
 
 export interface FakeRun {
@@ -353,7 +355,7 @@ function repo(name: string, files: Record<string, string>, opts: Partial<FakeRep
 	};
 }
 
-export const RUN_STEPS: FakeRunStep[] = [
+const RUN_STEPS: FakeRunStep[] = [
 	{ name: 'Set up job', durationMs: 1200 },
 	{ name: 'Récupérer le code', durationMs: 1500 },
 	{ name: 'Écrire le fichier .env', durationMs: 600 },
@@ -363,6 +365,20 @@ export const RUN_STEPS: FakeRunStep[] = [
 	{ name: 'Nettoyer les images inutilisées', durationMs: 900 },
 	{ name: 'Complete job', durationMs: 400 }
 ];
+
+/** Étapes du workflow qui ne tournent que si leur variable de dépôt est définie. */
+const CONDITIONAL_STEPS: Record<string, string> = {
+	'Sauvegarder la base (avant déploiement)': 'FORGE_DB_SERVICE',
+	'Post-déploiement': 'FORGE_POST_DEPLOY'
+};
+
+/** Étapes d'un nouveau run, comme GitHub les exécuterait avec ces variables de dépôt. */
+export function runSteps(variables: Map<string, string>): FakeRunStep[] {
+	return RUN_STEPS.map((s) => {
+		const v = CONDITIONAL_STEPS[s.name];
+		return v && !variables.get(v) ? { ...s, durationMs: 100, skipped: true } : s;
+	});
+}
 
 function pastRun(id: number, repoName: string, label: string, daysAgo: number, conclusion: 'success' | 'failure', message: string): FakeRun {
 	const created = Date.now() - daysAgo * 86400_000;

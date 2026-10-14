@@ -1,4 +1,5 @@
 import { INTERNET_PROBE_URL, parseInternetProbe, type InternetProbe } from '$lib/domain/firewall';
+import { sensitiveEnvValues } from '$lib/domain/env-template';
 import { effectiveSize } from '$lib/domain/sizes';
 import { ReadCommand } from '../../gateways';
 import type { ProjectRow } from '$server/infrastructure/db/schema';
@@ -20,11 +21,8 @@ export function decryptEnv(ctx: StepContext): string {
 	const p = ctx.project();
 	if (!p.envEncrypted) return '';
 	const text = ctx.services.cipher.decrypt(p.envEncrypted, envAad(p.id));
-	// Chaque valeur du .env doit être masquée dans les logs.
-	for (const line of text.split('\n')) {
-		const idx = line.indexOf('=');
-		if (idx > 0) ctx.services.redactor.add(line.slice(idx + 1).replace(/^["']|["']$/g, ''));
-	}
+	// Seules les valeurs sensibles sont masquées : « production » ou « postgres » restent lisibles.
+	ctx.services.redactor.add(...sensitiveEnvValues(text));
 	return text;
 }
 

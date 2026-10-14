@@ -167,6 +167,9 @@ export class ConnectionTester {
 
 		// Matrice CT par CT : la preuve que la prod est intouchable.
 		const protectedIds = settings.safetyContext().protectedCtids;
+		if (protectedIds.length === 0) {
+			items.push({ label: 'CT protégés', status: 'warn', detail: 'Aucun CT de production protégé : lancez infra/02 (PROD_CTIDS de infra/lib.sh) ou renseignez Réglages → Réseau.' });
+		}
 		for (const g of guests) {
 			const perms = all[`/vms/${g.vmid}`] ?? (await proxmox.permissions(`/vms/${g.vmid}`))[`/vms/${g.vmid}`] ?? {};
 			const writePrivs = WRITE_PRIVS.filter((p) => perms[p]);
@@ -204,7 +207,9 @@ export class ConnectionTester {
 		const me = await github.api.whoami();
 		const owner = settings.get('github.owner');
 		items.push(
-			me.login.toLowerCase() === owner.toLowerCase()
+			!owner
+				? { label: 'Compte', status: 'error', detail: `Connecté en tant que ${me.login}, mais aucun propriétaire des dépôts défini (Réglages → GitHub)` }
+				: me.login.toLowerCase() === owner.toLowerCase()
 				? { label: 'Compte', status: 'ok', detail: `Connecté en tant que ${me.login}` }
 				: { label: 'Compte', status: 'warn', detail: `Connecté en tant que ${me.login}, propriétaire attendu : ${owner}` }
 		);
@@ -312,8 +317,11 @@ export class ConnectionTester {
 
 	async #doh(items: CheckItem[]): Promise<string> {
 		const ip = this.s.settings.get('network.publicIp');
-		const ips = await this.s.resolver().resolveA('bastiengrnt.fr');
-		items.push({ label: 'dns.google', status: ips.length ? 'ok' : 'warn', detail: `bastiengrnt.fr → ${ips.join(', ') || 'aucune réponse'}${ips.includes(ip) ? ' (IP publique du serveur)' : ''}` });
+		if (!ip) items.push({ label: 'IP publique', status: 'error', detail: 'Non définie (Réglages → Réseau) : aucun enregistrement A ne peut être créé' });
+		// Un domaine d'un projet s'il y en a un (il doit pointer vers l'IP publique), sinon un nom quelconque.
+		const name = this.s.repos.domains.all()[0]?.fqdn ?? 'github.com';
+		const ips = await this.s.resolver().resolveA(name);
+		items.push({ label: 'dns.google', status: ips.length ? 'ok' : 'warn', detail: `${name} → ${ips.join(', ') || 'aucune réponse'}${ip && ips.includes(ip) ? ' (IP publique du serveur)' : ''}` });
 		return 'Résolution OK';
 	}
 }

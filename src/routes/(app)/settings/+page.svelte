@@ -215,7 +215,7 @@
 					<SettingField name="network.ipStart" label="Première IP Forge" value={v['network.ipStart']} />
 					<SettingField name="network.ipEnd" label="Dernière IP Forge" value={v['network.ipEnd']} />
 					<SettingField name="network.cidr" label="Masque (CIDR)" value={v['network.cidr']} />
-					<SettingField name="network.reservedIps" label="IP jamais attribuées" value={v['network.reservedIps']} help="Séparées par des virgules (ex. 10.10.10.50 : ancienne règle Palworld)." />
+					<SettingField name="network.reservedIps" label="IP jamais attribuées" value={v['network.reservedIps']} help="Séparées par des virgules : passerelle, NPM, Forge et toute IP utilisée hors Proxmox." />
 					<SettingField name="network.npmIp" label="IP de Nginx Proxy Manager" value={v['network.npmIp']} help="Seule source autorisée vers le port des apps (pare-feu)." />
 					<SettingField name="network.forgeIp" label="IP de Forge (CT 150)" value={v['network.forgeIp']} help="Autorisée en SSH vers les CT de projet." />
 					<SettingField name="network.nameserver" label="DNS des CT de projet" value={v['network.nameserver']} help="IP séparées par des espaces (ex. 1.1.1.1 9.9.9.9), appliquées à la configuration du CT. Vide : hérité de l'hôte (Tailscale MagicDNS)." />
@@ -223,7 +223,7 @@
 					<SettingField name="ctid.min" label="Premier CTID" value={v['ctid.min']} />
 					<SettingField name="ctid.max" label="Dernier CTID" value={v['ctid.max']} />
 					<div class="md:col-span-2">
-						<SettingField name="safety.protectedCtids" label="CT de production protégés" value={v['safety.protectedCtids']} help="Défense supplémentaire : aucune action possible sur ces CT, même dans le pool." />
+						<SettingField name="safety.protectedCtids" label="CT de production protégés" value={v['safety.protectedCtids']} help="Défense supplémentaire : aucune action possible sur ces CT, même dans le pool. Remis par infra/02 depuis PROD_CTIDS (infra/lib.sh)." />
 					</div>
 					<div class="md:col-span-2">
 						<SettingField

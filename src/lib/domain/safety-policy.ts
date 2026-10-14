@@ -153,6 +153,9 @@ export function assertCanCreateDnsRecord(
 	if (req.fieldType !== 'A') {
 		throw new SafetyViolation('dns.type', `Seuls les enregistrements A sont autorisés (jamais d'AAAA). Demandé : ${req.fieldType}.`);
 	}
+	if (!isIpv4(ctx.publicIp)) {
+		throw new SafetyViolation('dns.public-ip', 'IP publique du serveur non définie (Réglages → Réseau).');
+	}
 	if (req.target !== ctx.publicIp) {
 		throw new SafetyViolation('dns.target', `La cible doit être l'IP publique ${ctx.publicIp} (demandé : ${req.target}).`);
 	}

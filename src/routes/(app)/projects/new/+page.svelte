@@ -116,6 +116,7 @@
 	const migrations = $derived(inspection?.compose?.migrationServices ?? []);
 	const canSubmit = $derived(
 		!!inspection?.detection.supported &&
+			!inspection.linkedProject &&
 			slugOk &&
 			domainsOk &&
 			!hasEnvErrors(envParsed) &&
@@ -197,7 +198,11 @@
 					{/if}
 
 					{#if inspection.linkedProject}
-						<Alert.Root class="border-warning/40 text-warning"><TriangleAlert /><Alert.Description class="text-warning/90">Ce dépôt est déjà lié au projet Forge « {inspection.linkedProject} ».</Alert.Description></Alert.Root>
+						<Alert.Root variant="destructive"
+							><TriangleAlert /><Alert.Description
+								>Ce dépôt est déjà lié au projet Forge « <a class="underline" href="/projects/{inspection.linkedProject}">{inspection.linkedProject}</a> » : un dépôt ne peut servir qu'à un seul projet.</Alert.Description
+							></Alert.Root
+						>
 					{/if}
 					{#each inspection.selfHosted as w (w.file)}
 						<Alert.Root class="border-warning/40 text-warning">

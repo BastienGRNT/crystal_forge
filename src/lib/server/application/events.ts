@@ -13,16 +13,10 @@ export class EventBus {
 
 	emitJob(jobId: number, event: JobEvent) {
 		this.#emitter.emit(`job:${jobId}`, event);
-		if (event.kind === 'status') this.#emitter.emit('jobs', jobId);
 	}
 
 	onJob(jobId: number, fn: (e: JobEvent) => void): () => void {
 		this.#emitter.on(`job:${jobId}`, fn);
 		return () => this.#emitter.off(`job:${jobId}`, fn);
-	}
-
-	onAnyJobStatus(fn: (jobId: number) => void): () => void {
-		this.#emitter.on('jobs', fn);
-		return () => this.#emitter.off('jobs', fn);
 	}
 }

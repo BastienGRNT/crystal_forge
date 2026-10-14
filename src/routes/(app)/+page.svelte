@@ -14,24 +14,44 @@
 	import { Button } from '$lib/components/atoms/ui/button';
 	import * as Alert from '$lib/components/atoms/ui/alert';
 	import { cn } from '$lib/utils';
+	import { deferred } from '$lib/deferred.svelte';
 
 	let { data } = $props();
 	let refreshing = $state(false);
+	/** Jamais deux rechargements en même temps (Proxmox lent = requêtes qui s'empilent). */
+	let inFlight = false;
 
+	async function reload() {
+		if (inFlight) return;
+		inFlight = true;
+		try {
+			await invalidate('forge:dashboard');
+		} finally {
+			inFlight = false;
+		}
+	}
 	async function refresh() {
 		refreshing = true;
-		await invalidate('forge:dashboard');
+		await reload();
 		refreshing = false;
 	}
 	onMount(() => {
 		const t = setInterval(() => {
-			if (document.visibilityState === 'visible') void invalidate('forge:dashboard');
-		}, 10_000);
+			if (document.visibilityState === 'visible') void reload();
+		}, 30_000);
 		return () => clearInterval(t);
 	});
 
-	const forgeCards = $derived(data.cards.filter((c) => c.kind === 'forge' || c.kind === 'orphan'));
-	const otherCards = $derived(data.cards.filter((c) => c.kind === 'readonly' || c.kind === 'template'));
+	// Dépôt et dernier run de chaque CT : lus sur GitHub, arrivent après la page.
+	const github = deferred(() => data.github);
+	const cards = $derived(
+		data.cards.map((c) => {
+			const gh = github.value?.byVmid[c.vmid];
+			return gh ? { ...c, repo: gh.repo, lastRun: gh.lastRun } : c;
+		})
+	);
+	const forgeCards = $derived(cards.filter((c) => c.kind === 'forge' || c.kind === 'orphan'));
+	const otherCards = $derived(cards.filter((c) => c.kind === 'readonly' || c.kind === 'template'));
 </script>
 
 <svelte:head><title>Tableau de bord · Forge</title></svelte:head>
@@ -54,6 +74,13 @@
 			<Alert.Description>{e.message}</Alert.Description>
 		</Alert.Root>
 	{/each}
+	{#if github.value?.error}
+		<Alert.Root variant="destructive">
+			<TriangleAlert />
+			<Alert.Title>GitHub injoignable</Alert.Title>
+			<Alert.Description>{github.value.error}</Alert.Description>
+		</Alert.Root>
+	{/if}
 
 	{#if data.host}
 		<HostStats host={data.host} node={data.node} />

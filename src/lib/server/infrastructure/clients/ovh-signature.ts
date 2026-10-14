@@ -39,7 +39,8 @@ export function dangerousOvhRules(rules: OvhRule[]): { rule: OvhRule; reason: st
 export function ovhCreateTokenUrl(endpointBase: string, zones: string[], includeDelete: boolean): string {
 	const host = new URL(endpointBase).origin;
 	const params: string[] = ['GET=/domain/zone', 'GET=/auth/currentCredential'];
-	for (const z of zones) {
+	// Zones inconnues (clés OVH pas encore saisies) : règles valables pour toutes les zones.
+	for (const z of zones.length ? zones : ['*']) {
 		params.push(`GET=/domain/zone/${z}/record`, `GET=/domain/zone/${z}/record/*`, `POST=/domain/zone/${z}/record`, `POST=/domain/zone/${z}/refresh`);
 		if (includeDelete) params.push(`DELETE=/domain/zone/${z}/record/*`);
 	}

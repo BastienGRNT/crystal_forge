@@ -10,8 +10,9 @@ export const WORKFLOW_FILE = 'forge-deploy.yml';
  * « Mettre à niveau le projet » propose alors la nouvelle version aux projets existants.
  *   1 : version initiale
  *   2 : sauvegarde de la base avant déploiement (FORGE_DB_SERVICE / FORGE_DB_KIND)
+ *   3 : en-tête corrigé (Forge peut mettre le fichier à niveau, après confirmation)
  */
-export const WORKFLOW_VERSION = 2;
+export const WORKFLOW_VERSION = 3;
 export const CHECKOUT_ACTION = 'actions/checkout@v7';
 /** Fichier compose généré par le workflow en mode « Dockerfile seul ». */
 export const GENERATED_COMPOSE_FILE = '.forge-compose.yml';
@@ -102,7 +103,8 @@ export function generateWorkflow(opts: WorkflowOptions): string {
 # forge-workflow-version: ${WORKFLOW_VERSION}
 # S'exécute sur le runner self-hosted${ctNote} (label « ${slug} »).
 # Configuration : variables de dépôt FORGE_* et secret ENV_FILE, modifiables
-# depuis Forge. Forge ne réécrit jamais ce fichier une fois commité.
+# depuis Forge. Forge ne réécrit ce fichier que sur « Mettre à niveau le
+# projet », après confirmation, et seulement s'il n'a pas été modifié à la main.
 # Aucune commande de ce workflow ne supprime de volume Docker.
 # Si FORGE_DB_SERVICE est défini, la base est sauvegardée avant chaque
 # déploiement dans /home/github/forge-backups (10 dernières conservées).

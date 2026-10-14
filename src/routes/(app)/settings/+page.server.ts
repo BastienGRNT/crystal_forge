@@ -11,7 +11,7 @@ export const load: PageServerLoad = async () => {
 	const f = forge();
 	const view = f.settings.publicView();
 	const zones = await f.wizard.zones();
-	const zoneList = zones.zones.length ? zones.zones : ['bastiengrnt.fr', 'pharmagaia.com'];
+	const zoneList = zones.zones;
 	const pub = f.settings.get('ssh.publicKey');
 	return {
 		...view,

@@ -18,23 +18,13 @@ export function normalizeSubdomain(sub: string): string {
 	return sub.trim().toLowerCase().replace(/\.+$/, '').replace(/^\.+/, '');
 }
 
+/** Un proxy host sert-il ce nom ? (les noms DNS ne tiennent pas compte de la casse) */
+export function servesDomain(domainNames: string[], fqdn: string): boolean {
+	const name = fqdn.toLowerCase();
+	return domainNames.some((d) => d.toLowerCase() === name);
+}
+
 export function buildFqdn(subdomain: string, zone: string): string {
 	const sub = normalizeSubdomain(subdomain);
 	return (sub ? `${sub}.${zone}` : zone).toLowerCase();
-}
-
-/** Découpe un FQDN selon la zone la plus longue qui le contient. */
-export function splitFqdn(fqdn: string, zones: string[]): { subdomain: string; zone: string } | null {
-	const name = fqdn.toLowerCase().replace(/\.$/, '');
-	const sorted = [...zones].sort((a, b) => b.length - a.length);
-	for (const zone of sorted) {
-		const z = zone.toLowerCase();
-		if (name === z) return { subdomain: '', zone: z };
-		if (name.endsWith(`.${z}`)) return { subdomain: name.slice(0, -(z.length + 1)), zone: z };
-	}
-	return null;
-}
-
-export function isValidFqdn(fqdn: string): boolean {
-	return isValidZone(fqdn);
 }

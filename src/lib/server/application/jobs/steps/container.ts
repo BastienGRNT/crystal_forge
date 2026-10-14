@@ -12,7 +12,8 @@ export const containerStep: StepDefinition = {
 		let p = ctx.project();
 		const size = sizeOf(p);
 		const range = { min: settings.int('ctid.min'), max: settings.int('ctid.max') };
-		const guests = await proxmox.guests();
+		// Les jobs lisent l'état réel de Proxmox, jamais le cache d'affichage.
+		const guests = await proxmox.api.guests();
 
 		// --- 1. Allocation CTID + IP (une seule fois ; réservée en base aussitôt) -------------
 		if (!p.ctid || !p.ip) {
@@ -81,7 +82,7 @@ export const containerStep: StepDefinition = {
 			...(nameserver ? { nameserver } : {}),
 			tags: 'forge'
 		});
-		ctx.log('success', `Configuré : ${size.cores} cœur(s), ${size.memoryMb} Mo RAM, ${size.swapMb} Mo swap, ${ip}/24 sur ${settings.get('proxmox.bridge')}.`);
+		ctx.log('success', `Configuré : ${size.cores} cœur(s), ${size.memoryMb} Mo RAM, ${size.swapMb} Mo swap, ${ip}/${settings.int('network.cidr')} sur ${settings.get('proxmox.bridge')}.`);
 
 		// --- 4. Disque (agrandissement uniquement) ------------------------------------------------
 		const cfg = await proxmox.guestConfig(ctid);
@@ -95,7 +96,7 @@ export const containerStep: StepDefinition = {
 		}
 
 		// --- 5. Démarrage + SSH -------------------------------------------------------------------
-		const status = (await proxmox.guests()).find((g) => g.vmid === ctid)?.status;
+		const status = (await proxmox.api.guests()).find((g) => g.vmid === ctid)?.status;
 		if (status !== 'running') {
 			const upid = await proxmox.power(ctid, 'start');
 			await proxmox.waitTask(upid, { timeoutMs: 2 * 60_000 });

@@ -22,6 +22,7 @@ function memoryStore(): SettingsStore {
 function gateway() {
 	const apis = createFakeApis();
 	const settings = new SettingsService(memoryStore(), { encrypt: (s) => s, decrypt: (s) => s });
+	settings.set({ 'safety.protectedCtids': '100,101,401,402,403,404', 'proxmox.node': 'ns3125740' });
 	const guard = new WriteGuard(() => false, (s) => s);
 	const ownership = { owned: () => [{ type: 'pve_ct' as const, externalId: String(CTID), projectId: 1 }] };
 	const projects = { forgeIps: () => [IP], forgeRepos: () => [] };
@@ -79,5 +80,10 @@ describe('DbCommand', () => {
 
 	it('restauration : même regroupement après gunzip', () => {
 		expect(DbCommand.restore(loc, '20261014-120000-manual.sql.gz').toString()).toMatch(/gunzip -c '[^']+' \| \(cd '/);
+	});
+
+	it('téléchargement : slug validé comme pour les autres commandes', () => {
+		expect(() => DbCommand.download({ slug: '../etc' }, '20261014-120000-manual.sql.gz', 1024)).toThrow(/Projet invalide/);
+		expect(() => DbCommand.download({ slug: 'app' }, '20261014-120000-manual.sql.gz', 1024)).not.toThrow();
 	});
 });

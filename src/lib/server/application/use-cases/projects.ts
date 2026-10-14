@@ -1,19 +1,19 @@
 /** Cas d'usage sur les projets : création + déploiement, .env, domaines, conteneur, suppression. */
 import { detectDeployMode, isValidServiceName, normalizeWorkdir, repoPath } from '$lib/domain/compose-detect';
-import { buildFqdn, isValidSubdomain, isValidZone, normalizeSubdomain } from '$lib/domain/domain-name';
+import { buildFqdn, isValidSubdomain, isValidZone, normalizeSubdomain, servesDomain } from '$lib/domain/domain-name';
 import { errorMessage, SafetyViolation, UserFacingError } from '$lib/domain/errors';
 import { hasEnvErrors, maskValue, parseEnv } from '$lib/domain/env-file';
+import { isIpv4 } from '$lib/domain/network';
 import { assertSafeCommand } from '$lib/domain/safety-policy';
 import { assessHostRam, isSizeKey, SIZES, validateResize, type SizeKey } from '$lib/domain/sizes';
 import { isValidSlug, RESERVED_SLUGS, slugify } from '$lib/domain/slug';
-import { WORKFLOW_FILE } from '$lib/domain/workflow';
+import { GENERATED_COMPOSE_FILE, WORKFLOW_FILE } from '$lib/domain/workflow';
 import type { ProjectRow } from '$server/infrastructure/db/schema';
 import { ReadCommand } from '../gateways';
 import type { JobEngine } from '../jobs/engine';
 import type { PowerAction } from '../ports';
 import { envAad, type ForgeServices } from '../services';
 import { runnerRepoDir, sizeOf } from '../jobs/steps/common';
-import { GENERATED_COMPOSE_FILE } from '$lib/domain/workflow';
 import { analyzeCompose, type DbKind } from '$lib/domain/compose-analysis';
 import { checkEnvAgainst, type ComposeEnvRef } from '$lib/domain/env-template';
 import { findEnvTemplate } from './wizard';
@@ -71,7 +71,14 @@ export class ProjectService {
 
 		const [owner, repoName] = input.repo.split('/');
 		if (!owner || !repoName) errors.push('Dépôt invalide.');
+		else if (!settings.get('github.owner')) errors.push('Propriétaire des dépôts non défini (Réglages → GitHub).');
 		else if (owner.toLowerCase() !== settings.get('github.owner').toLowerCase()) errors.push(`Le dépôt doit appartenir à ${settings.get('github.owner')}.`);
+		else {
+			// Un dépôt = un projet : un second runner et un workflow qui n'en cible qu'un seraient incohérents.
+			const linked = repos.projects.list().find((p) => `${p.repoOwner}/${p.repoName}`.toLowerCase() === input.repo.toLowerCase());
+			if (linked) errors.push(`Ce dépôt est déjà lié au projet « ${linked.slug} ».`);
+		}
+		if (!isIpv4(settings.get('network.publicIp'))) errors.push('IP publique non définie (Réglages → Réseau).');
 
 		let workdir = '.';
 		try {
@@ -127,7 +134,7 @@ export class ProjectService {
 
 		const hosts = await this.s.proxy.listHosts();
 		for (const d of domains) {
-			const h = hosts.find((x) => x.domainNames.includes(d.fqdn));
+			const h = hosts.find((x) => servesDomain(x.domainNames, d.fqdn));
 			if (h) throw new UserFacingError(`Un proxy host NPM existe déjà pour ${d.fqdn} (→ ${h.forwardHost}:${h.forwardPort}). Rien n'est écrasé.`);
 		}
 
@@ -278,7 +285,7 @@ export class ProjectService {
 		const fqdn = buildFqdn(sub, zone);
 		if (this.s.repos.domains.byFqdn(fqdn)) throw new UserFacingError(`${fqdn} est déjà utilisé par un projet Forge.`);
 		const hosts = await this.s.proxy.listHosts();
-		if (hosts.some((h) => h.domainNames.includes(fqdn))) throw new UserFacingError(`Un proxy host NPM existe déjà pour ${fqdn}.`);
+		if (hosts.some((h) => servesDomain(h.domainNames, fqdn))) throw new UserFacingError(`Un proxy host NPM existe déjà pour ${fqdn}.`);
 		const row = this.s.repos.domains.create({ projectId: p.id, fqdn, zone, subdomain: sub, mode: d.managed ? 'ovh' : 'manual', status: 'pending' });
 		return this.engine.enqueue({ type: 'add_domain', projectId: p.id, params: { domainIds: [row.id] } }).id;
 	}
@@ -303,7 +310,7 @@ export class ProjectService {
 		return {
 			error,
 			domains: domains.map((d) => {
-				const h = hosts.find((x) => x.domainNames.includes(d.fqdn));
+				const h = hosts.find((x) => servesDomain(x.domainNames, d.fqdn));
 				return {
 					...d,
 					proxyHostId: h?.id ?? null,
@@ -377,14 +384,25 @@ export class ProjectService {
 		return this.engine.enqueue({ type: 'firewall', projectId: p.id, params: { forceFirewall: true } }).id;
 	}
 
+	/** Partie Proxmox de l'onglet Conteneur (lectures en cache, en parallèle). */
 	async containerView(p: ProjectRow) {
 		const { proxmox } = this.s;
-		const guest = p.ctid ? ((await proxmox.guests()).find((g) => g.vmid === p.ctid) ?? null) : null;
-		const config = guest ? await proxmox.guestConfig(guest.vmid).catch(() => null) : null;
-		const backups = p.ctid ? await proxmox.listBackups(p.ctid).catch(() => []) : [];
+		if (!p.ctid) return { guest: null, config: null, backups: [] };
+		const ctid = p.ctid;
+		const [guests, config, backups] = await Promise.all([
+			proxmox.guests(),
+			proxmox.guestConfig(ctid).catch(() => null),
+			proxmox.listBackups(ctid).catch(() => [])
+		]);
+		const guest = guests.find((g) => g.vmid === ctid) ?? null;
+		return { guest, config: guest ? config : null, backups };
+	}
+
+	/** Services Docker du CT (docker compose ps par SSH) : plus lent, chargé en différé. */
+	async containerServices(p: ProjectRow, running: boolean) {
 		let services: { name: string; service: string; state: string; status: string; image: string; ports: string }[] = [];
 		let servicesError: string | null = null;
-		if (guest?.status === 'running' && p.ip) {
+		if (running && p.ip) {
 			try {
 				const res = await this.s.shell.read({ ip: p.ip, sshHostKey: p.sshHostKey }, ReadCommand.composePs(runnerRepoDir(p), p.workdir, this.#composeFile(p)));
 				services = res.stdout
@@ -409,7 +427,7 @@ export class ProjectService {
 				servicesError = errorMessage(err);
 			}
 		}
-		return { guest, config, backups, services, servicesError };
+		return { services, error: servicesError };
 	}
 
 	async containerLogs(p: ProjectRow, tail: number, service?: string): Promise<string> {

@@ -4,7 +4,7 @@
  * Lecture seule par défaut ; toute écriture passe par le garde (DRY_RUN respecté).
  */
 import { gzipSync } from 'node:zlib';
-import { analyzeCompose, isSqlDbKind, type DbKind, type SqlDbKind } from '$lib/domain/compose-analysis';
+import { analyzeCompose, type DbKind, type SqlDbKind } from '$lib/domain/compose-analysis';
 import { repoPath } from '$lib/domain/compose-detect';
 import {
 	analyzeSql,
@@ -241,9 +241,5 @@ export class DatabaseService {
 			throw new UserFacingError(`Fichier trop gros pour le navigateur (${Math.round(Number(sizeLine) / 1024 ** 2)} Mo) : récupérez-le avec scp.`);
 		}
 		return Buffer.from(data.trim(), 'base64');
-	}
-
-	static isSql(kind: string | null): kind is SqlDbKind {
-		return isSqlDbKind(kind);
 	}
 }

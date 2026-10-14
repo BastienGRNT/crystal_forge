@@ -28,7 +28,7 @@ import type {
 	SshResult,
 	SshTarget
 } from '$server/application/ports';
-import { demoTables, GiB, HOST, MiB, RUN_STEPS, world, type FakeFwRule, type FakeGuest, type FakeTable, type FakeNpmHost, type FakeRepo, type FakeRun, type FakeTask } from './world';
+import { demoTables, GiB, HOST, MiB, runSteps, world, type FakeFwRule, type FakeGuest, type FakeTable, type FakeNpmHost, type FakeRepo, type FakeRun, type FakeTask } from './world';
 
 const delay = (min = 60, max = 220) => new Promise((r) => setTimeout(r, min + Math.random() * (max - min)));
 const NODE = 'ns3125740';
@@ -498,6 +498,18 @@ class FakeGithub implements GithubApi {
 		return [...seen.entries()].map(([n, type]) => ({ name: n, path: prefix + n, type }));
 	}
 
+	async listTree(owner: string, name: string) {
+		await delay();
+		const r = repoOf(owner, name);
+		const entries = new Map<string, 'file' | 'dir'>();
+		for (const p of r.files.keys()) {
+			const parts = p.split('/');
+			for (let i = 1; i < parts.length; i++) entries.set(parts.slice(0, i).join('/'), 'dir');
+			entries.set(p, 'file');
+		}
+		return { entries: [...entries].map(([path, type]) => ({ path, type })), truncated: false };
+	}
+
 	async getFile(owner: string, name: string, path: string) {
 		await delay(40, 120);
 		const r = repoOf(owner, name);
@@ -545,7 +557,10 @@ class FakeGithub implements GithubApi {
 				steps: run.steps.map((s, i) => {
 					let status = 'queued';
 					let conclusion: string | null = null;
-					if (st.status === 'completed') {
+					if (s.skipped && (st.status === 'completed' || i <= st.stepIdx)) {
+						status = 'completed';
+						conclusion = 'skipped';
+					} else if (st.status === 'completed') {
 						status = 'completed';
 						conclusion = st.conclusion === 'failure' ? (i < st.stepIdx ? 'success' : i === st.stepIdx ? 'failure' : 'skipped') : 'success';
 					} else if (i < st.stepIdx) {
@@ -595,12 +610,6 @@ class FakeGithub implements GithubApi {
 		return { keyId: '3380204578043523366', key: w.ghKeyPair.publicKey };
 	}
 
-	async getSecretMeta(owner: string, name: string, secret: string) {
-		await delay();
-		const at = repoOf(owner, name).secrets.get(secret);
-		return at ? { updatedAt: new Date(at).toISOString() } : null;
-	}
-
 	async listVariables(owner: string, name: string) {
 		await delay();
 		return [...repoOf(owner, name).variables.entries()].map(([n, value]) => ({ name: n, value }));
@@ -625,10 +634,6 @@ class FakeGithub implements GithubApi {
 		await delay();
 		repoOf(owner, name);
 		return { token: 'A' + randomBytes(16).toString('hex').toUpperCase().slice(0, 28), expiresAt: new Date(Date.now() + 3600_000).toISOString() };
-	}
-
-	async createRemoveToken(owner: string, name: string) {
-		return this.createRegistrationToken(owner, name);
 	}
 
 	async deleteRunner(owner: string, name: string, runnerId: number) {
@@ -674,7 +679,7 @@ class FakeGithub implements GithubApi {
 			actor: 'BastienGRNT',
 			createdAt: Date.now(),
 			startedAt: null,
-			steps: RUN_STEPS,
+			steps: runSteps(r.variables),
 			failAtStep: null,
 			runnerLabel: labelFromWorkflow(wf)
 		};

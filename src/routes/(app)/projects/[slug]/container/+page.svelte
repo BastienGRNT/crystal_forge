@@ -36,9 +36,13 @@
 	import { Label } from '$lib/components/atoms/ui/label';
 	import { Checkbox } from '$lib/components/atoms/ui/checkbox';
 	import { cn } from '$lib/utils';
+	import { deferred } from '$lib/deferred.svelte';
 
 	let { data, form } = $props();
 	const c = $derived(data.container);
+	// docker compose ps (SSH) : arrive après la page, l'ancienne liste reste affichée pendant un rafraîchissement.
+	const svc = deferred(() => data.services);
+	const services = $derived(svc.value?.services ?? []);
 	const g = $derived(c.guest);
 	const running = $derived(g?.status === 'running');
 
@@ -76,9 +80,19 @@
 		queueMicrotask(() => powerForm?.requestSubmit());
 	}
 
+	/** Jamais deux rafraîchissements en même temps. */
+	let inFlight = false;
 	onMount(() => {
 		if (running) void loadLogs();
-		const t = setInterval(() => void invalidate('forge:container'), 10_000);
+		const t = setInterval(async () => {
+			if (inFlight || document.visibilityState !== 'visible') return;
+			inFlight = true;
+			try {
+				await invalidate('forge:container');
+			} finally {
+				inFlight = false;
+			}
+		}, 15_000);
 		return () => clearInterval(t);
 	});
 	const size = $derived(effectiveSize(data.project.size, data.project));
@@ -187,9 +201,11 @@
 		</SectionCard>
 
 		<SectionCard title="Services Docker" description="docker compose ps — {data.composePath}" icon={Layers} bodyClass="p-0">
-			{#if c.servicesError}
-				<div class="p-4"><Alert.Root variant="destructive"><Alert.Description>{c.servicesError}</Alert.Description></Alert.Root></div>
-			{:else if c.services.length === 0}
+			{#if !svc.value}
+				<p class="flex items-center gap-2 px-5 py-6 text-sm text-muted-foreground"><Spinner /> docker compose ps…</p>
+			{:else if svc.value.error}
+				<div class="p-4"><Alert.Root variant="destructive"><Alert.Description>{svc.value.error}</Alert.Description></Alert.Root></div>
+			{:else if services.length === 0}
 				<p class="px-5 py-6 text-sm text-muted-foreground">{running ? 'Aucun service (premier déploiement pas encore exécuté ?)' : 'Le CT est arrêté.'}</p>
 			{:else}
 				<div class="overflow-x-auto">
@@ -204,7 +220,7 @@
 							</tr>
 						</thead>
 						<tbody class="divide-y">
-							{#each c.services as s (s.name)}
+							{#each services as s (s.name)}
 								<tr>
 									<td class="px-5 py-2.5 font-mono font-medium">{s.service}</td>
 									<td class="px-3 py-2.5 font-mono text-xs text-muted-foreground">{s.name}</td>
@@ -225,7 +241,7 @@
 					<Select.Trigger size="sm" class="min-w-32">{service || 'Tous les services'}</Select.Trigger>
 					<Select.Content>
 						<Select.Item value="" label="Tous les services">Tous les services</Select.Item>
-						{#each c.services as s (s.service)}<Select.Item value={s.service} label={s.service}>{s.service}</Select.Item>{/each}
+						{#each services as s (s.service)}<Select.Item value={s.service} label={s.service}>{s.service}</Select.Item>{/each}
 					</Select.Content>
 				</Select.Root>
 				<Select.Root type="single" bind:value={tail}>

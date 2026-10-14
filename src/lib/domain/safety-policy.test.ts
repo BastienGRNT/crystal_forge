@@ -73,6 +73,9 @@ describe('DNS', () => {
 		expect(() => assertCanCreateDnsRecord(ctx, { ...base, subDomain: 'wallet' }, existing)).toThrow(/rien n'est écrasé/);
 		expect(() => assertCanCreateDnsRecord(ctx, { ...base, subDomain: 'WWW' }, existing)).toThrow();
 	});
+	it('refuse tout enregistrement tant que l’IP publique n’est pas définie', () => {
+		expect(() => assertCanCreateDnsRecord({ ...ctx, publicIp: '' }, { ...base, subDomain: 'x', target: '' }, existing)).toThrow(/IP publique/);
+	});
 	it('signale un wildcard qui couvre le nom', () => {
 		expect(wildcardCovering('app.lab', existing)?.id).toBe(4);
 		expect(wildcardCovering('app', existing)).toBeUndefined();

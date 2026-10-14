@@ -15,10 +15,9 @@ export const load: PageServerLoad = async ({ params, depends }) => {
 			rootfs: view.config ? String(view.config.rootfs ?? '') : null,
 			swap: view.config ? Number(view.config.swap ?? 0) : null,
 			onboot: view.config ? Number(view.config.onboot ?? 0) === 1 : null,
-			backups: view.backups,
-			services: view.services,
-			servicesError: view.servicesError
+			backups: view.backups
 		},
+		services: f.projects.containerServices(p, view.guest?.status === 'running'),
 		composePath: f.projects.composePath(p),
 		firewall
 	};

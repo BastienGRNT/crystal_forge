@@ -132,6 +132,20 @@ export class GithubClient implements GithubApi {
 		}
 	}
 
+	async listTree(owner: string, repo: string, ref: string) {
+		try {
+			const res = await this.#o.rest.git.getTree({ owner, repo, tree_sha: ref, recursive: 'true' });
+			const entries = res.data.tree
+				.filter((e) => e.path && (e.type === 'blob' || e.type === 'tree'))
+				.map((e) => ({ path: e.path as string, type: e.type === 'tree' ? ('dir' as const) : ('file' as const) }));
+			return { entries, truncated: res.data.truncated };
+		} catch (e) {
+			// Dépôt vide (409) ou branche absente (404) : rien à lister.
+			if ([404, 409].includes((e as { status?: number }).status ?? 0)) return { entries: [], truncated: false };
+			wrap(e, 'arborescence du dépôt');
+		}
+	}
+
 	async getFile(owner: string, repo: string, path: string, ref?: string) {
 		try {
 			const res = await this.#o.rest.repos.getContent({ owner, repo, path, ref });
@@ -223,16 +237,6 @@ export class GithubClient implements GithubApi {
 		}
 	}
 
-	async getSecretMeta(owner: string, repo: string, name: string) {
-		try {
-			const res = await this.#o.rest.actions.getRepoSecret({ owner, repo, secret_name: name });
-			return { updatedAt: res.data.updated_at };
-		} catch (e) {
-			if ((e as { status?: number }).status === 404) return null;
-			wrap(e, `secret ${name}`);
-		}
-	}
-
 	async listVariables(owner: string, repo: string) {
 		try {
 			const res = await this.#o.rest.actions.listRepoVariables({ owner, repo, per_page: 30 });
@@ -266,15 +270,6 @@ export class GithubClient implements GithubApi {
 			return { token: res.data.token, expiresAt: res.data.expires_at };
 		} catch (e) {
 			wrap(e, "jeton d'enregistrement du runner");
-		}
-	}
-
-	async createRemoveToken(owner: string, repo: string) {
-		try {
-			const res = await this.#o.rest.actions.createRemoveTokenForRepo({ owner, repo });
-			return { token: res.data.token, expiresAt: res.data.expires_at };
-		} catch (e) {
-			wrap(e, 'jeton de retrait du runner');
 		}
 	}
 

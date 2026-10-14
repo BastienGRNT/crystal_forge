@@ -9,7 +9,6 @@ const config = {
 		adapter: adapter({ out: 'build' }),
 		csrf: { trustedOrigins: [] },
 		alias: {
-			'$components': 'src/lib/components',
 			'$server': 'src/lib/server'
 		}
 	}

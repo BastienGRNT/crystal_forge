@@ -25,7 +25,8 @@ import {
 	type OwnedResource,
 	type ResourceType
 } from '$lib/domain/safety-policy';
-import { DRY_PREFIX, isSimulated, type WriteGuard } from './guard';
+import { TtlCache } from './cache';
+import { DRY_PREFIX, isSimulated, type WriteGuard, type WriteOp } from './guard';
 import type {
 	ExternalApis,
 	NpmCreateProxyHost,
@@ -60,7 +61,8 @@ interface Deps {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+/** Applique fn à chaque élément, au plus `limit` à la fois. */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
 	const out: R[] = new Array(items.length);
 	let i = 0;
 	const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -80,6 +82,8 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 export class ProxmoxGateway {
 	/** CT « clonés » pendant un DRY_RUN : considérés comme existants pour la suite du job. */
 	readonly #simulatedCts = new Set<number>();
+	/** Lectures affichées (pages, tableau de bord). Vidé après chaque écriture et chaque tâche terminée. */
+	readonly #cache = new TtlCache();
 
 	constructor(private readonly d: Deps) {}
 
@@ -91,13 +95,14 @@ export class ProxmoxGateway {
 		return this.api.version();
 	}
 	nodeStatus() {
-		return this.api.nodeStatus();
+		return this.#cache.get('node', 5_000, () => this.api.nodeStatus());
 	}
 	storageStatus(storage = this.d.settings.get('proxmox.storage')) {
-		return this.api.storageStatus(storage);
+		return this.#cache.get(`storage:${storage}`, 10_000, () => this.api.storageStatus(storage));
 	}
+	/** Liste des CT et VM (cache de 2 s : regroupe les lectures d'une même page). */
 	guests() {
-		return this.api.guests();
+		return this.#cache.get('guests', 2_000, () => this.api.guests());
 	}
 	guestConfig(vmid: number, type: 'lxc' | 'qemu' = 'lxc') {
 		if (this.#simulatedCts.has(vmid)) return Promise.resolve({ hostname: 'simulé', rootfs: 'local:simulated,size=6G' } as Record<string, unknown>);
@@ -106,13 +111,32 @@ export class ProxmoxGateway {
 	permissions(path?: string) {
 		return this.api.permissions(path);
 	}
-	listBackups(vmid: number) {
-		return this.api.listBackups(this.d.settings.get('proxmox.backupStorage'), vmid);
+	listBackups(vmid: number, opts: { fresh?: boolean } = {}) {
+		const read = () => this.api.listBackups(this.d.settings.get('proxmox.backupStorage'), vmid);
+		return opts.fresh ? read() : this.#cache.get(`backups:${vmid}`, 30_000, read);
 	}
 
-	/** IP déclarées par TOUS les CT et VM (pas seulement ceux du pool). */
+	/**
+	 * IP déclarées par chaque CT et VM, pour l'AFFICHAGE (tableau de bord, aperçu de l'assistant) :
+	 * une lecture de config par invité, gardée 60 s. Les allocations et le garde utilisent usedIps().
+	 */
+	guestIps(): Promise<Map<number, string[]>> {
+		return this.#cache.get('ips', 60_000, async () => {
+			const list = await this.guests();
+			const configs = await mapLimit(list, 6, async (g) => {
+				try {
+					return { vmid: g.vmid, ips: ipsFromGuestConfig(await this.api.guestConfig(g.vmid, g.type)) };
+				} catch {
+					return { vmid: g.vmid, ips: [] };
+				}
+			});
+			return new Map(configs.map((c) => [c.vmid, c.ips]));
+		});
+	}
+
+	/** IP déclarées par TOUS les CT et VM (pas seulement ceux du pool), lues en direct. */
 	async usedIps(guests?: PveGuest[]): Promise<{ ip: string; vmid: number }[]> {
-		const list = guests ?? (await this.guests());
+		const list = guests ?? (await this.api.guests());
 		const configs = await mapLimit(list, 4, async (g) => {
 			try {
 				return { vmid: g.vmid, config: await this.api.guestConfig(g.vmid, g.type) };
@@ -142,6 +166,8 @@ export class ProxmoxGateway {
 				}
 			}
 			if (status.status === 'stopped') {
+				// Clone, démarrage, sauvegarde… terminés : l'état affiché a changé.
+				this.#cache.clear();
 				if (status.exitstatus && status.exitstatus !== 'OK' && !status.exitstatus.startsWith('WARNINGS')) {
 					throw new Error(`Tâche Proxmox en échec : ${status.exitstatus}`);
 				}
@@ -154,7 +180,8 @@ export class ProxmoxGateway {
 
 	async #facts(vmid: number): Promise<GuestFacts> {
 		if (this.#simulatedCts.has(vmid)) return { vmid, pool: this.d.settings.get('proxmox.pool'), template: false, exists: true };
-		const g = (await this.guests()).find((x) => x.vmid === vmid);
+		// Contrôle de sécurité : état réel, jamais le cache.
+		const g = (await this.api.guests()).find((x) => x.vmid === vmid);
 		return { vmid, pool: g?.pool ?? null, template: g?.template ?? false, exists: !!g };
 	}
 
@@ -162,6 +189,11 @@ export class ProxmoxGateway {
 		const owned = this.d.ownership.owned('pve_ct');
 		for (const id of this.#simulatedCts) owned.push({ type: 'pve_ct', externalId: String(id), projectId: null });
 		return owned;
+	}
+
+	/** Écriture gardée ; le cache est vidé ensuite, qu'elle réussisse ou non. */
+	#run<T>(op: WriteOp<T>): Promise<T> {
+		return this.d.guard.run(op).finally(() => this.#cache.clear());
 	}
 
 	async #assertModifiable(vmid: number) {
@@ -172,12 +204,12 @@ export class ProxmoxGateway {
 		const s = this.d.settings;
 		const templateId = s.int('proxmox.templateId');
 		const pool = s.get('proxmox.pool');
-		return this.d.guard.run({
+		return this.#run({
 			system: 'proxmox',
 			action: 'lxc.clone',
 			summary: `Cloner le template ${templateId} → CT ${newId} « ${hostname} » (pool ${pool}, clone complet sur ${s.get('proxmox.storage')})`,
 			check: async () => {
-				const existingIds = (await this.guests()).map((g) => g.vmid);
+				const existingIds = (await this.api.guests()).map((g) => g.vmid);
 				assertCanCloneCt(s.safetyContext(), { sourceId: templateId, newId, pool, existingIds });
 				if (!(await this.api.isIdFree(newId))) throw new SafetyViolation('clone.exists', `Le CTID ${newId} est déjà pris.`);
 			},
@@ -191,7 +223,7 @@ export class ProxmoxGateway {
 	}
 
 	configure(vmid: number, config: Record<string, string | number>): Promise<void> {
-		return this.d.guard.run({
+		return this.#run({
 			system: 'proxmox',
 			action: 'lxc.config',
 			summary: `Configurer le CT ${vmid} : ${Object.entries(config)
@@ -208,7 +240,7 @@ export class ProxmoxGateway {
 	}
 
 	resize(vmid: number, sizeGb: number): Promise<string | null> {
-		return this.d.guard.run({
+		return this.#run({
 			system: 'proxmox',
 			action: 'lxc.resize',
 			summary: `Agrandir le disque du CT ${vmid} à ${sizeGb} Go`,
@@ -220,7 +252,7 @@ export class ProxmoxGateway {
 
 	power(vmid: number, action: PowerAction): Promise<string> {
 		const labels: Record<PowerAction, string> = { start: 'Démarrer', stop: 'Arrêter (forcé)', shutdown: 'Éteindre', reboot: 'Redémarrer' };
-		return this.d.guard.run({
+		return this.#run({
 			system: 'proxmox',
 			action: `lxc.${action}`,
 			summary: `${labels[action]} le CT ${vmid}`,
@@ -232,7 +264,7 @@ export class ProxmoxGateway {
 
 	backup(vmid: number): Promise<string> {
 		const storage = this.d.settings.get('proxmox.backupStorage');
-		return this.d.guard.run({
+		return this.#run({
 			system: 'proxmox',
 			action: 'vzdump',
 			summary: `Sauvegarder le CT ${vmid} (vzdump snapshot, zstd) sur ${storage}`,
@@ -254,7 +286,7 @@ export class ProxmoxGateway {
 	 * Les règles ajoutées à la main (sans ce préfixe) ne sont jamais touchées.
 	 */
 	applyFirewall(vmid: number, plan: FirewallRule[], options: FirewallOptions): Promise<void> {
-		return this.d.guard.run({
+		return this.#run({
 			system: 'proxmox',
 			action: 'lxc.firewall',
 			summary: `Pare-feu du CT ${vmid} : ${plan.length} règle(s) Forge, entrée DROP par défaut, anti-usurpation IP`,
@@ -283,7 +315,7 @@ export class ProxmoxGateway {
 				if (Number(cfg.protection ?? 0) === 1) await this.configure(vmid, { protection: 0 });
 			}
 		}
-		return this.d.guard.run({
+		return this.#run({
 			system: 'proxmox',
 			action: 'lxc.destroy',
 			summary: `SUPPRIMER le CT ${vmid} et ses disques`,
@@ -465,14 +497,22 @@ export class GithubGateway {
 // =================================================================================
 
 export class DnsGateway {
+	readonly #cache = new TtlCache();
+
 	constructor(private readonly d: Deps) {}
 
 	get api() {
 		return this.d.apis().ovh;
 	}
 
+	/** Zones du compte, lues en direct (étape DNS). */
 	listZones() {
 		return this.api.listZones();
+	}
+
+	/** Zones pour l'affichage (formulaires, réglages) : elles changent rarement, gardées 5 min. */
+	zones() {
+		return this.#cache.get('zones', 5 * 60_000, () => this.api.listZones());
 	}
 
 	async recordsFor(zone: string, subDomain: string): Promise<OvhRecord[]> {
@@ -539,15 +579,23 @@ export class DnsGateway {
 // =================================================================================
 
 export class ProxyGateway {
+	/** Lectures affichées ; vidé après chaque écriture. Les contrôles du garde lisent en direct. */
+	readonly #cache = new TtlCache();
+
 	constructor(private readonly d: Deps) {}
 
 	get api() {
 		return this.d.apis().npm;
 	}
 
+	/** Proxy hosts pour l'affichage et les vérifications préalables (gardés 10 s). */
 	listHosts() {
-		return this.api.listProxyHosts();
+		return this.#cache.get('hosts', 10_000, () => this.api.listProxyHosts());
 	}
+	#run<T>(op: WriteOp<T>): Promise<T> {
+		return this.d.guard.run(op).finally(() => this.#cache.clear());
+	}
+
 	listCertificates() {
 		return this.api.listCertificates();
 	}
@@ -571,7 +619,7 @@ export class ProxyGateway {
 			locations: [],
 			meta: { letsencrypt_agree: true, letsencrypt_email: input.email, dns_challenge: false }
 		};
-		return this.d.guard.run({
+		return this.#run({
 			system: 'npm',
 			action: 'proxy-host.create',
 			summary: `Créer le proxy host ${input.domain} → http://${input.forwardHost}:${input.forwardPort} (Let's Encrypt, SSL forcé, HTTP/2, websockets)`,
@@ -601,7 +649,7 @@ export class ProxyGateway {
 	}
 
 	deleteProxyHost(id: number) {
-		return this.d.guard.run({
+		return this.#run({
 			system: 'npm',
 			action: 'proxy-host.delete',
 			summary: `Supprimer le proxy host #${id}`,
@@ -612,7 +660,7 @@ export class ProxyGateway {
 	}
 
 	deleteCertificate(id: number) {
-		return this.d.guard.run({
+		return this.#run({
 			system: 'npm',
 			action: 'certificate.delete',
 			summary: `Supprimer le certificat #${id}`,
@@ -733,9 +781,6 @@ export class ReadCommand {
 	static internet() {
 		return new ReadCommand(`: forge-op=internet; curl -sS -o /dev/null -m 8 -w '%{http_code}' ${shq(INTERNET_PROBE_URL)}`);
 	}
-	static diskUsage() {
-		return new ReadCommand(`df -B1 --output=size,used,avail / | tail -n1`);
-	}
 }
 
 /** Emplacement du service de base dans le compose du projet. */
@@ -750,9 +795,13 @@ export interface DbLocation {
 
 const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
 
+function assertSlug(slug: string) {
+	if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) throw new SafetyViolation('db.slug', `Projet invalide : ${slug}`);
+}
+
 function assertLocation(l: DbLocation) {
 	if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/.test(l.service)) throw new SafetyViolation('db.service', `Service invalide : ${l.service}`);
-	if (!/^[a-z0-9][a-z0-9-]*$/.test(l.slug)) throw new SafetyViolation('db.slug', `Projet invalide : ${l.slug}`);
+	assertSlug(l.slug);
 }
 
 /**
@@ -808,7 +857,7 @@ export class DbCommand {
 
 	/** Écrit le dump gzip lu sur l'entrée standard dans le dossier des sauvegardes (vérifié avec gzip -t). */
 	static importDump(l: Pick<DbLocation, 'slug'>, name: string) {
-		if (!/^[a-z0-9][a-z0-9-]*$/.test(l.slug)) throw new SafetyViolation('db.slug', `Projet invalide : ${l.slug}`);
+		assertSlug(l.slug);
 		if (!isValidBackupName(name)) throw new SafetyViolation('db.backup-name', `Nom de sauvegarde invalide : ${name}`);
 		const dir = DbCommand.#dir(l);
 		const part = shq(`${dir}/${name}.part`);
@@ -820,11 +869,12 @@ export class DbCommand {
 	}
 
 	static listBackups(l: Pick<DbLocation, 'slug'>) {
-		if (!/^[a-z0-9][a-z0-9-]*$/.test(l.slug)) throw new SafetyViolation('db.slug', `Projet invalide : ${l.slug}`);
+		assertSlug(l.slug);
 		return new DbCommand('list', true, `: forge-db=list; find ${shq(DbCommand.#dir(l))} -maxdepth 1 -name '*.sql.gz' -printf '%f\t%s\t%T@\n' 2>/dev/null || true`);
 	}
 
 	static download(l: Pick<DbLocation, 'slug'>, name: string, maxBytes: number) {
+		assertSlug(l.slug);
 		if (!isValidBackupName(name)) throw new SafetyViolation('db.backup-name', `Nom de sauvegarde invalide : ${name}`);
 		const file = shq(`${DbCommand.#dir(l)}/${name}`);
 		return new DbCommand('download', true, `: forge-db=download; S=$(stat -c %s ${file}) && echo "$S" && if [ "$S" -le ${maxBytes} ]; then base64 -w0 ${file}; fi`);

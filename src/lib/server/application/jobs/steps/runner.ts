@@ -47,7 +47,7 @@ export const runnerStep: StepDefinition = {
 			onOutput: out,
 			timeoutMs: 2 * 60_000
 		});
-		if (r2.code !== 0) throw new Error(`svc.sh a échoué (code ${r2.code}) : ${(r2.stderr || r2.stdout).slice(-500)}`);
+		if (r2.code !== 0) throw new Error(`svc.sh a échoué (code ${r2.code}) : ${redactor.redact(r2.stderr || r2.stdout).slice(-500)}`);
 
 		if (ctx.dryRun) {
 			ctx.log('dry', '[DRY-RUN] Vérification « runner online » simulée.');
