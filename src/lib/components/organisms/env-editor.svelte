@@ -42,13 +42,25 @@
 		<div class="rounded-lg border">
 			<div class="flex items-center justify-between border-b px-3 py-2 text-xs font-medium text-muted-foreground">
 				<span class="inline-flex items-center gap-1.5"><KeyRound class="size-3.5" /> Aperçu</span>
-				<span>{parsed.entries.length} variable{parsed.entries.length > 1 ? 's' : ''}</span>
+				<span class="inline-flex items-center gap-2">
+					{parsed.entries.length} variable{parsed.entries.length > 1 ? 's' : ''}
+					{#if parsed.entries.length}
+						<!-- Même bascule que l'éditeur : les valeurs sont déjà dans la page. -->
+						<Button variant="ghost" size="icon-xs" onclick={() => (hidden = !hidden)} title={hidden ? 'Afficher les valeurs' : 'Masquer les valeurs'}>
+							{#if hidden}<Eye />{:else}<EyeOff />{/if}
+						</Button>
+					{/if}
+				</span>
 			</div>
 			<ul class="scrollbar-thin max-h-56 divide-y overflow-auto text-sm">
 				{#each parsed.entries as e (e.key)}
 					<li class="flex items-center justify-between gap-3 px-3 py-1.5">
-						<span class="truncate font-mono text-[13px]">{e.key}</span>
-						<span class="shrink-0 font-mono text-xs tracking-widest text-muted-foreground">{maskValue(e.value)}</span>
+						<span class="max-w-[45%] shrink-0 truncate font-mono text-[13px]" title={e.key}>{e.key}</span>
+						{#if hidden || e.value === ''}
+							<span class="shrink-0 font-mono text-xs tracking-widest text-muted-foreground">{maskValue(e.value)}</span>
+						{:else}
+							<span class="min-w-0 truncate font-mono text-xs select-all" title={e.value}>{e.value}</span>
+						{/if}
 					</li>
 				{:else}
 					<li class="px-3 py-6 text-center text-xs text-muted-foreground">Aucune variable (optionnel)</li>
