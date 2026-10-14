@@ -17,6 +17,13 @@
 # activé : leur trafic ne change pas. Seuls les CT où Forge active le pare-feu
 # (pool forge) sont filtrés.
 #
+# Si le pare-feu datacenter est DÉJÀ actif, le script ne change rien (vous l'avez
+# configuré vous-même). Avec policy_in=DROP, le CT 150 ne joint alors pas l'API
+# Proxmox (8006) : relancez infra/04-forge-ct.sh, qui ajoute la règle du nœud.
+#
+# Avec firewall=1, les CT de projet sortent par un pont fwbr : lancez aussi
+# infra/07-conntrack-zone.sh, sinon ils n'ont plus Internet (NAT).
+#
 # Retour arrière manuel : pvesh set /cluster/firewall/options --enable 0
 # Usage : bash infra/05-firewall.sh        Idempotent.
 # =============================================================================
@@ -45,6 +52,8 @@ if [[ "$current_enable" == "1" && "$current_in" == "ACCEPT" ]]; then
 fi
 if [[ "$current_enable" == "1" ]]; then
 	warn "Le pare-feu datacenter est DÉJÀ actif avec policy_in=$current_in. Ce script ne le modifie pas : vous l'avez configuré vous-même."
+	plan "L'hôte n'accepte 8006 que depuis local_network : pour que Forge (CT 150) joigne l'API, relancez bash infra/04-forge-ct.sh (règle du nœud)."
+	plan "NAT des CT avec pare-feu : bash infra/07-conntrack-zone.sh"
 	exit 0
 fi
 
@@ -79,6 +88,7 @@ warn "Vérifiez MAINTENANT depuis votre PC : l'interface Proxmox (8006), le SSH,
 if ask_yes_no "Tout fonctionne ? (sinon, le pare-feu se désactivera tout seul dans moins de 3 min)"; then
 	run systemctl stop "$ROLLBACK_UNIT.timer"
 	ok "Pare-feu datacenter actif, retour arrière annulé."
+	info "Étape suivante, pour que les CT avec pare-feu gardent Internet : bash infra/07-conntrack-zone.sh"
 	info "Dans Forge : Santé du serveur → « Appliquer le pare-feu » pour isoler les CT de projet existants."
 else
 	run pvesh set /cluster/firewall/options --enable 0

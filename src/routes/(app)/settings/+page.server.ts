@@ -31,6 +31,8 @@ function validate(values: Partial<Record<SettingKey, string>>) {
 	for (const k of ['network.publicIp', 'network.gateway', 'network.ipStart', 'network.ipEnd', 'network.npmIp', 'network.forgeIp'] as const) {
 		if (values[k] !== undefined && values[k] !== '' && !isIpv4(values[k] as string)) throw new UserFacingError(`${k} : IPv4 invalide`);
 	}
+	const ns = values['network.nameserver'];
+	if (ns && !ns.split(/\s+/).every(isIpv4)) throw new UserFacingError('network.nameserver : IPv4 séparées par des espaces');
 	for (const k of ['ctid.min', 'ctid.max', 'proxmox.templateId', 'network.cidr'] as const) {
 		if (values[k] !== undefined && values[k] !== '' && !/^\d+$/.test(values[k] as string)) throw new UserFacingError(`${k} : nombre attendu`);
 	}

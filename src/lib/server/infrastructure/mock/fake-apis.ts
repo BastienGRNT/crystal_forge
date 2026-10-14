@@ -1007,6 +1007,7 @@ async function fakeDbCommand(guest: FakeGuest, op: string, command: string, stdi
 		backups.unshift({ name, size: stdin.length, mtime: Date.now() });
 		return { code: 0, stdout: `${stdin.length}\n`, stderr: '' };
 	}
+	if (op === 'internet') return { code: 0, stdout: '200', stderr: '' };
 	if (op === 'versions') {
 		return { code: 0, stdout: `docker=28.5.1\nunattended=${w.unattended.has(guest.vmid) ? 'enabled' : 'disabled'}\nos=Ubuntu 24.04.3 LTS\n`, stderr: '' };
 	}

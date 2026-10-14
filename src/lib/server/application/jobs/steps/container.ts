@@ -67,6 +67,8 @@ export const containerStep: StepDefinition = {
 		}
 
 		// --- 3. Configuration ----------------------------------------------------------------------
+		// Sans nameserver, le CT hérite du resolv.conf de l'hôte (ex. Tailscale 100.100.100.100).
+		const nameserver = settings.get('network.nameserver').trim();
 		await proxmox.configure(ctid, {
 			cores: size.cores,
 			memory: size.memoryMb,
@@ -76,6 +78,7 @@ export const containerStep: StepDefinition = {
 			// Le clone hérite de protection=1 du template (infra/03) : sans ce 0, Proxmox
 			// refuse ensuite le rollback et la suppression du projet (« CT is protected »).
 			protection: 0,
+			...(nameserver ? { nameserver } : {}),
 			tags: 'forge'
 		});
 		ctx.log('success', `Configuré : ${size.cores} cœur(s), ${size.memoryMb} Mo RAM, ${size.swapMb} Mo swap, ${ip}/24 sur ${settings.get('proxmox.bridge')}.`);

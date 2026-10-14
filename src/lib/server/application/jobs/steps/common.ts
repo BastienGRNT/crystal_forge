@@ -1,4 +1,6 @@
+import { INTERNET_PROBE_URL, parseInternetProbe, type InternetProbe } from '$lib/domain/firewall';
 import { effectiveSize } from '$lib/domain/sizes';
+import { ReadCommand } from '../../gateways';
 import type { ProjectRow } from '$server/infrastructure/db/schema';
 import { envAad } from '../../services';
 import type { StepContext } from '../types';
@@ -46,6 +48,33 @@ export async function waitFor(
 		opts.onTick?.(elapsed);
 		await ctx.sleep(opts.intervalMs);
 	}
+}
+
+/** Commande à lancer sur l'hôte quand les CT avec pare-feu n'ont plus Internet. */
+export const CONNTRACK_FIX = 'bash infra/07-conntrack-zone.sh';
+
+/**
+ * Vérifie que le CT joint Internet (le runner en a besoin) au lieu de laisser config.sh
+ * bloqué sur « Authentication ». Avec firewall=1, l'absence de zone conntrack sur les
+ * ponts fwbr casse le NAT : c'est la cause la plus probable.
+ */
+export async function assertCtInternet(ctx: StepContext, ip: string): Promise<void> {
+	let last = 'down' as InternetProbe;
+	await waitFor(
+		ctx,
+		async () => {
+			const r = await ctx.services.shell.read({ ip, sshHostKey: ctx.project().sshHostKey }, ReadCommand.internet());
+			last = parseInternetProbe(r.code, r.stdout);
+			return last !== 'down';
+		},
+		{
+			intervalMs: 5000,
+			timeoutMs: 30_000,
+			timeoutMessage: `Le CT n'a pas accès à Internet (${INTERNET_PROBE_URL} injoignable depuis ${ip}). Avec le pare-feu Proxmox (firewall=1), le NAT exige une zone conntrack sur les ponts fwbr : lancez sur l'hôte « ${CONNTRACK_FIX} », puis reprenez le job.`
+		}
+	);
+	if (last === 'unknown') ctx.log('warn', 'curl absent du CT : accès Internet non vérifié.');
+	else ctx.log('success', `Accès Internet du CT vérifié (${INTERNET_PROBE_URL}).`);
 }
 
 export function shq(s: string): string {

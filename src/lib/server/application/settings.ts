@@ -40,6 +40,8 @@ export const SETTING_DEFS = {
 	'network.reservedIps': { default: '10.10.10.1,10.10.10.2,10.10.10.15,10.10.10.50,10.10.10.200' },
 	'network.npmIp': { default: '10.10.10.2' },
 	'network.forgeIp': { default: '10.10.10.15' },
+	/** DNS des CT de projet (IP séparées par des espaces). Vide = hérité de l'hôte. */
+	'network.nameserver': { default: '' },
 	/** Pare-feu Proxmox par CT de projet (isolement du bridge). */
 	'firewall.enabled': { default: 'true' },
 	'ctid.min': { default: '500' },

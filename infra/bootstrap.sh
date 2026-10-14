@@ -8,6 +8,7 @@
 #   04  CT 150 qui héberge Forge       (si CT 150 absent)
 #   03  template 900 Docker + runner   (si CT 900 absent ; nécessite la clé SSH de Forge)
 #   05  pare-feu datacenter            (si désactivé)
+#   07  zone conntrack fwbr+ (NAT des CT avec pare-feu) (si absente)
 # Chaque script affiche son plan et demande « oui » avant d'écrire.
 #
 # Usage :
@@ -60,6 +61,10 @@ fi
 fw_enabled="$(pvesh get /cluster/firewall/options --output-format json | perl -MJSON::PP -e 'local $/; print decode_json(<STDIN>)->{enable} // 0')"
 if step 05 "Pare-feu datacenter" '[[ "$fw_enabled" == 1 ]]'; then
 	bash "$INFRA_DIR/05-firewall.sh"
+fi
+
+if step 07 "Zone conntrack des ponts fwbr (NAT des CT avec pare-feu)" 'iptables -t raw -C PREROUTING -i "fwbr+" -j CT --zone 1 2>/dev/null && grep -qF -- "-i fwbr+ -j CT --zone 1" /etc/network/interfaces'; then
+	bash "$INFRA_DIR/07-conntrack-zone.sh"
 fi
 
 title "Terminé"

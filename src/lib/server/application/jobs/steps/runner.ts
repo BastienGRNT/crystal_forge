@@ -1,6 +1,9 @@
 /** Étape 2 — Runner GitHub self-hosted dans le CT. */
 import type { StepDefinition } from '../types';
-import { RUNNER_HOME, requireIp, shq, waitFor } from './common';
+import { CONNTRACK_FIX, RUNNER_HOME, requireIp, shq, waitFor } from './common';
+
+/** config.sh reste bloqué sur « Authentication » sans Internet : on le coupe avant le délai SSH. */
+const CONFIG_TIMEOUT_S = 150;
 
 export const runnerStep: StepDefinition = {
 	key: 'runner',
@@ -25,7 +28,7 @@ export const runnerStep: StepDefinition = {
 		const url = `https://github.com/${p.repoOwner}/${p.repoName}`;
 		const config = [
 			`cd ${RUNNER_HOME}`,
-			`if [ -f .runner ]; then echo 'Runner déjà configuré'; else ./config.sh --unattended --url ${shq(url)} --token ${shq(token)} --name ${shq(p.slug)} --labels ${shq(`forge,${p.slug}`)} --replace; fi`
+			`if [ -f .runner ]; then echo 'Runner déjà configuré'; else timeout ${CONFIG_TIMEOUT_S} ./config.sh --unattended --url ${shq(url)} --token ${shq(token)} --name ${shq(p.slug)} --labels ${shq(`forge,${p.slug}`)} --replace; fi`
 		].join(' && ');
 		const out = (s: string) => s.split('\n').filter((l) => l.trim()).forEach((l) => ctx.log('debug', redactor.redact(l)));
 		const r1 = await shell.run(target(), 'github', config, {
@@ -33,6 +36,9 @@ export const runnerStep: StepDefinition = {
 			onOutput: out,
 			timeoutMs: 3 * 60_000
 		});
+		if (r1.code === 124) {
+			throw new Error(`config.sh n'a pas abouti en ${CONFIG_TIMEOUT_S} s (bloqué sur « Authentication » ?) : le CT ne joint probablement pas GitHub. Sur l'hôte : ${CONNTRACK_FIX} si le pare-feu du CT est actif.`);
+		}
 		if (r1.code !== 0) throw new Error(`config.sh a échoué (code ${r1.code}) : ${redactor.redact(r1.stderr || r1.stdout).slice(-500)}`);
 
 		// svc.sh est lancé en root : l'utilisateur github n'a pas de sudo.

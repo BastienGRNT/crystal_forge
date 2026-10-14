@@ -1,8 +1,9 @@
 /** Étape « Pare-feu » : isole le CT du projet des autres CT du bridge (prod comprise). */
-import { FIREWALL_OPTIONS, planFirewallRules, subnetOf, withFirewallFlag } from '$lib/domain/firewall';
+import { FIREWALL_OPTIONS, hasFirewallFlag, planFirewallRules, subnetOf, withFirewallFlag } from '$lib/domain/firewall';
 import type { ProjectRow } from '$server/infrastructure/db/schema';
 import type { ForgeServices } from '../../services';
 import type { StepDefinition } from '../types';
+import { assertCtInternet } from './common';
 
 export function firewallPlan(s: ForgeServices, p: Pick<ProjectRow, 'appPort'>) {
 	const gateway = s.settings.get('network.gateway');
@@ -31,7 +32,7 @@ export const firewallStep: StepDefinition = {
 		// Le pare-feu d'un CT ne filtre que les interfaces marquées firewall=1.
 		const cfg = await proxmox.guestConfig(ctid);
 		const net0 = String(cfg.net0 ?? '');
-		if (net0 && !/(^|,)firewall=1(,|$)/.test(net0)) {
+		if (net0 && !hasFirewallFlag(net0)) {
 			await proxmox.configure(ctid, { net0: withFirewallFlag(net0) });
 			ctx.log('success', 'Interface eth0 : filtrage par le pare-feu Proxmox activé (firewall=1).');
 		}
@@ -53,5 +54,8 @@ export const firewallStep: StepDefinition = {
 			ctx.log('warn', 'Le pare-feu du datacenter est désactivé : les règles sont enregistrées mais pas appliquées. Lancez infra/05-firewall.sh sur l’hôte.');
 		}
 		if (!ctx.dryRun) ctx.updateProject({ firewallAppliedAt: Date.now() });
+
+		// Le CT sort désormais par un pont fwbr : on vérifie que le NAT fonctionne encore.
+		if (!ctx.dryRun && p.ip) await assertCtInternet(ctx, p.ip);
 	}
 };

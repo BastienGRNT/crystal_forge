@@ -4,7 +4,10 @@
  * manquant, la commande ou le script à lancer soi-même sur l'hôte.
  */
 import { errorMessage } from '$lib/domain/errors';
+import { hasFirewallFlag, INTERNET_PROBE_URL, parseInternetProbe } from '$lib/domain/firewall';
 import { inCidr } from '$lib/domain/network';
+import { ReadCommand } from '../gateways';
+import { CONNTRACK_FIX } from '../jobs/steps/common';
 import type { ForgeServices } from '../services';
 import { firewallPlan } from '../jobs/steps/firewall';
 import { poolAuditFix } from './connections';
@@ -152,6 +155,47 @@ export class ServerHealthService {
 							};
 				},
 				{ id: 'public', group: 'Réseau', label: 'Ports 80/443 → NPM' }
+			),
+			safe(
+				async () => {
+					// CT du pool avec firewall=1 : leur NAT passe par un pont fwbr (zone conntrack requise).
+					const guests = await guestsP;
+					const running = repos.projects
+						.list()
+						.filter((p) => p.status !== 'deleted' && p.ctid && p.ip && guests.some((g) => g.vmid === p.ctid && g.pool === pool && g.status === 'running'));
+					const filtered = (
+						await Promise.all(
+							running.map(async (p) => {
+								const cfg = await proxmox.guestConfig(p.ctid as number).catch(() => ({}) as Record<string, unknown>);
+								return hasFirewallFlag(String(cfg.net0 ?? '')) ? p : null;
+							})
+						)
+					).filter((p) => p !== null);
+					const base = { id: 'ct-internet', group: 'Réseau', label: 'Accès Internet des CT avec pare-feu' };
+					if (filtered.length === 0) return { ...base, status: 'info', detail: 'Aucun CT de projet démarré avec le pare-feu Proxmox (firewall=1).' };
+					const results = await Promise.all(
+						filtered.map(async (p) => {
+							const r = await this.s.shell.read({ ip: p.ip as string, sshHostKey: p.sshHostKey }, ReadCommand.internet()).catch(() => null);
+							return { p, probe: r ? parseInternetProbe(r.code, r.stdout) : null };
+						})
+					);
+					const down = results.filter((r) => r.probe === 'down');
+					const unreachable = results.filter((r) => r.probe === null);
+					if (down.length) {
+						return {
+							...base,
+							status: 'error',
+							detail: `Sans Internet (${INTERNET_PROBE_URL}) : ${down.map((r) => `${r.p.slug} (CT ${r.p.ctid})`).join(', ')}. Le runner ne peut plus joindre GitHub.`,
+							fix: `${CONNTRACK_FIX} (zone conntrack des ponts fwbr, sur l’hôte)`
+						};
+					}
+					return {
+						...base,
+						status: unreachable.length ? 'warn' : 'ok',
+						detail: `${results.length - unreachable.length}/${results.length} CT joignent ${INTERNET_PROBE_URL}.${unreachable.length ? ` SSH impossible vers : ${unreachable.map((r) => r.p.slug).join(', ')}.` : ''}`
+					};
+				},
+				{ id: 'ct-internet', group: 'Réseau', label: 'Accès Internet des CT avec pare-feu' }
 			),
 			safe(
 				async () => {

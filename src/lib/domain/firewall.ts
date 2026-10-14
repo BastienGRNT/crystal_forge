@@ -100,6 +100,26 @@ export function subnetOf(gateway: string, cidr: number): string {
 }
 
 /** Ajoute firewall=1 à une valeur net0 Proxmox (sans toucher au reste). */
+/** net0 filtré par le pare-feu Proxmox : le trafic du CT traverse alors un pont fwbr. */
+export function hasFirewallFlag(net0: string): boolean {
+	return /(^|,)firewall=1(,|$)/.test(net0);
+}
+
+/** Cible du test d'accès Internet depuis un CT (celle dont le runner a besoin). */
+export const INTERNET_PROBE_URL = 'https://api.github.com';
+
+export type InternetProbe = 'ok' | 'down' | 'unknown';
+
+/**
+ * Interprète `curl -sS -o /dev/null -w '%{http_code}'` lancé dans le CT : toute réponse
+ * HTTP (même 403) prouve l'accès ; « 000 » ou rien = pas d'Internet ; 127 = curl absent.
+ */
+export function parseInternetProbe(code: number, stdout: string): InternetProbe {
+	if (code === 127) return 'unknown';
+	const http = Number(/(\d{3})\s*$/.exec(stdout.trim())?.[1] ?? 0);
+	return http >= 100 ? 'ok' : 'down';
+}
+
 export function withFirewallFlag(net0: string): string {
 	const parts = net0.split(',').filter((p) => !p.startsWith('firewall='));
 	return [...parts, 'firewall=1'].join(',');

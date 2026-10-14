@@ -7,7 +7,7 @@ import { SafetyViolation } from '$lib/domain/errors';
 import { ipsFromGuestConfig } from '$lib/domain/network';
 import type { SqlDbKind } from '$lib/domain/compose-analysis';
 import { BACKUP_ROOT, dumpScript, isValidBackupName, MAX_RESULT_BYTES, queryScript, restoreScript } from '$lib/domain/database';
-import { FORGE_RULE_PREFIX, firewallUpToDate, isForgeRule, type FirewallOptions, type FirewallRule } from '$lib/domain/firewall';
+import { FORGE_RULE_PREFIX, firewallUpToDate, INTERNET_PROBE_URL, isForgeRule, type FirewallOptions, type FirewallRule } from '$lib/domain/firewall';
 import {
 	assertCanCloneCt,
 	assertCanCreateDnsRecord,
@@ -728,6 +728,10 @@ export class ReadCommand {
 		return new ReadCommand(
 			`: forge-op=versions; echo "docker=$(docker version --format '{{.Server.Version}}' 2>/dev/null)"; echo "unattended=$(systemctl is-enabled unattended-upgrades 2>/dev/null || echo absent)"; . /etc/os-release && echo "os=$PRETTY_NAME"`
 		);
+	}
+	/** Accès Internet du CT (NAT) : code HTTP de l'API GitHub, « 000 » si injoignable. */
+	static internet() {
+		return new ReadCommand(`: forge-op=internet; curl -sS -o /dev/null -m 8 -w '%{http_code}' ${shq(INTERNET_PROBE_URL)}`);
 	}
 	static diskUsage() {
 		return new ReadCommand(`df -B1 --output=size,used,avail / | tail -n1`);

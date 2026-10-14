@@ -10,6 +10,10 @@
 #     où arrive Tailscale avec SNAT) et 100.64.0.0/10 (Tailscale sans SNAT).
 #     Les autres CT du bridge (dont les apps de prod) ne peuvent pas joindre Forge.
 #   • aucun proxy host NPM : Forge n'est pas exposé sur Internet.
+#   • si le pare-feu du datacenter est DÉJÀ actif (enable=1, policy_in=DROP par
+#     défaut), l'hôte n'accepte 8006 que depuis local_network (le /24 de l'IP
+#     publique) : une règle du pare-feu du NŒUD, qui ne fait qu'ouvrir, autorise
+#     10.10.10.15 → 8006 (API Proxmox). Sans elle : « Proxmox injoignable ».
 #
 # Usage : bash infra/04-forge-ct.sh
 # Idempotent : si le CT 150 existe déjà (hostname forge), seuls Docker et le
@@ -38,7 +42,22 @@ else
 	assert_ip_free "$CT_IP"
 fi
 
+# Pare-feu datacenter déjà actif : il faut ouvrir 8006 au CT 150 sur le nœud.
+API_RULE_COMMENT="Forge (CT $CT_ID) -> API Proxmox"
+fw_enabled="$(pvesh get /cluster/firewall/options --output-format json | perl -MJSON::PP -e 'local $/; print decode_json(<STDIN>)->{enable} // 0')"
+need_api_rule=0
+if [[ "$fw_enabled" == 1 ]]; then
+	if pvesh get "/nodes/$FORGE_NODE/firewall/rules" --output-format json \
+		| perl -MJSON::PP -e 'local $/; exit !(grep { ($_->{type}//"") eq "in" && ($_->{action}//"") eq "ACCEPT" && ($_->{source}//"") eq $ARGV[0] && ($_->{dport}//"") eq "8006" && ($_->{enable}//0) } @{decode_json(<STDIN>)})' "$CT_IP"; then
+		ok "Pare-feu datacenter actif : règle du nœud $CT_IP → 8006 déjà présente."
+	else
+		need_api_rule=1
+		warn "Pare-feu datacenter actif : le CT $CT_ID ne peut pas joindre l'API Proxmox (8006) sans règle du nœud."
+	fi
+fi
+
 title "Ce que le script va faire"
+[[ $need_api_rule -eq 1 ]] && plan "Pare-feu du nœud $FORGE_NODE : ACCEPT tcp $CT_IP → 8006 (« $API_RULE_COMMENT »), n'ouvre que ce port"
 if [[ $mode == create ]]; then
 	plan "pct create $CT_ID ($CT_NAME) : Ubuntu 24.04, 1 cœur, 1 Go RAM, 512 Mo swap, 8 Go, $CT_IP/24 sur $FORGE_BRIDGE, onboot=1, hors pool"
 fi
@@ -104,6 +123,12 @@ iptables -S FORGE-IN
 install -d -m 750 /opt/forge
 EOF
 ok "Pare-feu actif."
+
+if [[ $need_api_rule -eq 1 ]]; then
+	title "Accès à l'API Proxmox"
+	run pvesh create "/nodes/$FORGE_NODE/firewall/rules" --type in --action ACCEPT --source "$CT_IP" --proto tcp --dport 8006 --enable 1 --comment "$API_RULE_COMMENT"
+	ok "Règle ajoutée (retrait : Datacenter → $FORGE_NODE → Pare-feu, ou pvesh delete /nodes/$FORGE_NODE/firewall/rules/<pos>)."
+fi
 
 title "Terminé"
 info "CT $CT_ID prêt. Étape suivante : déployer Forge dans /opt/forge (docs/INSTALL.md, section « Déployer Forge »)."
