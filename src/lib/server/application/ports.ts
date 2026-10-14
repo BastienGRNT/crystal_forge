@@ -29,7 +29,8 @@ export interface PveGuest {
 export interface PveNodeStatus {
 	cpu: number;
 	cpus: number;
-	memory: { total: number; used: number; free: number };
+	/** `used` inclut le cache ZFS (ARC), que le noyau libère dès qu'un processus a besoin de RAM. */
+	memory: { total: number; used: number; free: number; arc: number };
 	swap: { total: number; used: number };
 	rootfs: { total: number; used: number };
 	uptime: number;

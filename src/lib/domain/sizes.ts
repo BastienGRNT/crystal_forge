@@ -19,6 +19,15 @@ export function isSizeKey(v: unknown): v is SizeKey {
 	return v === 'S' || v === 'M' || v === 'L';
 }
 
+/**
+ * RAM réellement occupée sur l'hôte, en octets : Proxmox compte le cache ZFS (ARC) dans
+ * « used », alors qu'il se libère sous la pression des processus. Le minimum que l'ARC
+ * garde (1/32 de la RAM par défaut) reste couvert par la marge de sécurité.
+ */
+export function hostMemoryInUse(memory: { used: number; arc: number }): number {
+	return Math.max(0, memory.used - Math.max(0, memory.arc));
+}
+
 /** Marge de RAM que l'on veut garder libre sur l'hôte après création d'un CT. */
 export const HOST_RAM_SAFETY_MARGIN_MB = 1024;
 

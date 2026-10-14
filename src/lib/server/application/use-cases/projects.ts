@@ -1,11 +1,11 @@
 /** Cas d'usage sur les projets : création + déploiement, .env, domaines, conteneur, suppression. */
 import { detectDeployMode, isValidServiceName, normalizeWorkdir, repoPath } from '$lib/domain/compose-detect';
 import { buildFqdn, isValidSubdomain, isValidZone, normalizeSubdomain, servesDomain } from '$lib/domain/domain-name';
-import { errorMessage, SafetyViolation, UserFacingError } from '$lib/domain/errors';
+import { errorMessage, RamTightError, SafetyViolation, UserFacingError } from '$lib/domain/errors';
 import { hasEnvErrors, maskValue, parseEnv } from '$lib/domain/env-file';
 import { isIpv4 } from '$lib/domain/network';
 import { assertSafeCommand } from '$lib/domain/safety-policy';
-import { assessHostRam, isSizeKey, SIZES, validateResize, type SizeKey } from '$lib/domain/sizes';
+import { assessHostRam, hostMemoryInUse, isSizeKey, SIZES, validateResize, type SizeKey } from '$lib/domain/sizes';
 import { isValidSlug, RESERVED_SLUGS, slugify } from '$lib/domain/slug';
 import { GENERATED_COMPOSE_FILE, WORKFLOW_FILE } from '$lib/domain/workflow';
 import type { ProjectRow } from '$server/infrastructure/db/schema';
@@ -139,12 +139,12 @@ export class ProjectService {
 		}
 
 		const node = await proxmox.nodeStatus();
-		const ram = assessHostRam(node.memory.total / 1024 ** 2, node.memory.used / 1024 ** 2, SIZES[size]);
+		const ram = assessHostRam(node.memory.total / 1024 ** 2, hostMemoryInUse(node.memory) / 1024 ** 2, SIZES[size]);
 		if (ram.level === 'insufficient') {
 			throw new UserFacingError(`RAM insuffisante sur l'hôte : ${Math.round(ram.freeMb)} Mo libres pour un CT de ${SIZES[size].memoryMb} Mo.`);
 		}
 		if (ram.level === 'tight' && !input.acknowledgeRam) {
-			throw new UserFacingError(`Il ne resterait que ${Math.round(ram.afterMb)} Mo de RAM libre sur l'hôte : cochez la confirmation pour continuer.`);
+			throw new RamTightError(`Il ne resterait que ${Math.round(ram.afterMb)} Mo de RAM libre sur l'hôte : cochez la confirmation pour continuer.`, ram.afterMb);
 		}
 
 		// Base de données : seulement un service réel du compose, d'un type pris en charge.
@@ -362,10 +362,10 @@ export class ProjectService {
 		if (check.errors.length) throw new UserFacingError(check.errors.join('\n'));
 		if (check.extraMemoryMb > 0) {
 			const node = await this.s.proxmox.nodeStatus();
-			const ram = assessHostRam(node.memory.total / 1024 ** 2, node.memory.used / 1024 ** 2, { ...SIZES.S, memoryMb: check.extraMemoryMb });
+			const ram = assessHostRam(node.memory.total / 1024 ** 2, hostMemoryInUse(node.memory) / 1024 ** 2, { ...SIZES.S, memoryMb: check.extraMemoryMb });
 			if (ram.level === 'insufficient') throw new UserFacingError(`RAM insuffisante sur l'hôte : ${Math.round(ram.freeMb)} Mo libres pour ${check.extraMemoryMb} Mo de plus.`);
 			if (ram.level === 'tight' && !acknowledgeRam) {
-				throw new UserFacingError(`Il ne resterait que ${Math.round(ram.afterMb)} Mo de RAM libre sur l'hôte : cochez la confirmation pour continuer.`);
+				throw new RamTightError(`Il ne resterait que ${Math.round(ram.afterMb)} Mo de RAM libre sur l'hôte : cochez la confirmation pour continuer.`, ram.afterMb);
 			}
 		}
 		const preset = SIZES[target.preset];

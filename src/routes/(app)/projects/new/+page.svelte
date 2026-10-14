@@ -106,6 +106,9 @@
 	});
 
 	const ram = $derived(preview ? assessHostRam(preview.memTotalMb, preview.memTotalMb - preview.ram.freeMb, SIZES[size]) : null);
+	/** RAM serrée d'après l'aperçu, ou d'après le serveur qui a relu l'hôte au moment de créer. */
+	const serverTightMb = $derived(form && 'ramTightMb' in form && typeof form.ramTightMb === 'number' ? form.ramTightMb : null);
+	const ramTight = $derived(ram?.level === 'tight' || (serverTightMb !== null && ram?.level !== 'insufficient'));
 	const envParsed = $derived(parseEnv(env));
 	const slugOk = $derived(isValidSlug(slug));
 	const domainsOk = $derived(domains.length > 0 && domains.every((d) => d.zone.trim() !== ''));
@@ -122,7 +125,7 @@
 			!hasEnvErrors(envParsed) &&
 			(envUnresolved === 0 || ackEnv) &&
 			ram?.level !== 'insufficient' &&
-			(ram?.level !== 'tight' || ackRam) &&
+			(!ramTight || ackRam) &&
 			!submitting
 	);
 	const domainsJson = $derived(JSON.stringify(domains.map((d) => ({ subdomain: d.subdomain, zone: d.zone, managed: !d.custom }))));
@@ -334,11 +337,11 @@
 		<SectionCard title="5. Conteneur" description="Clone complet du template 900 (Docker + runner) dans le pool forge." icon={Server}>
 			<div class="space-y-4">
 				<SizePicker bind:value={size} freeMb={preview?.ram.freeMb ?? null} totalMb={preview?.memTotalMb ?? null} />
-				{#if ram?.level === 'tight'}
+				{#if ramTight}
 					<label class="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
 						<Checkbox bind:checked={ackRam} name="acknowledgeRam" class="mt-0.5" />
 						<span>
-							<span class="font-medium text-warning">RAM serrée</span> — il ne resterait que {Math.round(ram.afterMb)} Mo libres sur l'hôte. Je confirme vouloir créer ce CT.
+							<span class="font-medium text-warning">RAM serrée</span> — il ne resterait que {serverTightMb ?? Math.round(ram?.afterMb ?? 0)} Mo libres sur l'hôte. Je confirme vouloir créer ce CT.
 						</span>
 					</label>
 				{:else if ram?.level === 'insufficient'}

@@ -16,6 +16,16 @@ export class UserFacingError extends Error {
 	}
 }
 
+/** RAM de l'hôte serrée : l'utilisateur peut confirmer et relancer (case dédiée dans le formulaire). */
+export class RamTightError extends UserFacingError {
+	readonly afterMb: number;
+	constructor(message: string, afterMb: number) {
+		super(message);
+		this.name = 'RamTightError';
+		this.afterMb = afterMb;
+	}
+}
+
 /** Erreur d'appel à une API externe (Proxmox, GitHub, OVH, NPM…). */
 export class ExternalApiError extends Error {
 	readonly system: string;

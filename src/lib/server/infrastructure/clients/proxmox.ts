@@ -89,7 +89,35 @@ export class ProxmoxClient implements ProxmoxApi {
 	}
 
 	async nodeStatus(): Promise<PveNodeStatus> {
-		const s = await this.#call<{
+		const [s, arc] = await Promise.all([this.#statusRaw(), this.#arcSize()]);
+		return {
+			cpu: s.cpu,
+			cpus: s.cpuinfo?.cpus ?? 0,
+			memory: { total: s.memory.total, used: s.memory.used, free: s.memory.free, arc: Math.min(arc, s.memory.used) },
+			swap: s.swap,
+			rootfs: s.rootfs,
+			uptime: s.uptime,
+			loadavg: s.loadavg ?? [],
+			pveversion: s.pveversion
+		};
+	}
+
+	/** Taille du cache ZFS (ARC) d'après le dernier point RRD du nœud ; 0 sans ZFS ou si illisible. */
+	async #arcSize(): Promise<number> {
+		try {
+			const rows = await this.#call<{ arcsize?: number }[]>('GET', `/nodes/${this.#node}/rrddata`, { timeframe: 'hour', cf: 'AVERAGE' });
+			for (let i = rows.length - 1; i >= 0; i--) {
+				const v = Number(rows[i]?.arcsize);
+				if (Number.isFinite(v) && v > 0) return v;
+			}
+		} catch {
+			/* sans ZFS (ou sans droit de lecture du RRD) : rien à déduire */
+		}
+		return 0;
+	}
+
+	#statusRaw() {
+		return this.#call<{
 			cpu: number;
 			cpuinfo: { cpus: number };
 			memory: { total: number; used: number; free: number };
@@ -99,16 +127,6 @@ export class ProxmoxClient implements ProxmoxApi {
 			loadavg: string[];
 			pveversion: string;
 		}>('GET', `/nodes/${this.#node}/status`);
-		return {
-			cpu: s.cpu,
-			cpus: s.cpuinfo?.cpus ?? 0,
-			memory: s.memory,
-			swap: s.swap,
-			rootfs: s.rootfs,
-			uptime: s.uptime,
-			loadavg: s.loadavg ?? [],
-			pveversion: s.pveversion
-		};
 	}
 
 	storageStatus(storage: string) {

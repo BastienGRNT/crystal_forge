@@ -1,4 +1,5 @@
 import { forge } from '$server/container';
+import { hostMemoryInUse } from '$lib/domain/sizes';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ depends }) => {
@@ -6,7 +7,7 @@ export const load: LayoutServerLoad = async ({ depends }) => {
 	const f = forge();
 	// En différé : un Proxmox lent ou injoignable ne doit pas bloquer l'affichage des pages.
 	const host = f.proxmox.nodeStatus().then(
-		(n) => ({ memUsed: n.memory.used, memTotal: n.memory.total, cpu: n.cpu }),
+		(n) => ({ memUsed: hostMemoryInUse(n.memory), memTotal: n.memory.total, cpu: n.cpu }),
 		() => null
 	);
 	const projects = f.repos.projects.list().map((p) => ({ slug: p.slug, name: p.name, status: p.status }));

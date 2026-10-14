@@ -1,6 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { forge } from '$server/container';
-import { errorMessage, UserFacingError } from '$lib/domain/errors';
+import { errorMessage, RamTightError, UserFacingError } from '$lib/domain/errors';
 import type { DomainInput } from '$server/application/use-cases/projects';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -44,6 +44,8 @@ export const actions: Actions = {
 			});
 			jobId = res.jobId;
 		} catch (err) {
+			// L'aperçu peut avoir vu plus de RAM libre que la création : la case de confirmation doit apparaître.
+			if (err instanceof RamTightError) return fail(400, { error: err.message, ramTightMb: Math.round(err.afterMb) });
 			if (err instanceof UserFacingError) return fail(400, { error: err.message });
 			return fail(502, { error: errorMessage(err) });
 		}

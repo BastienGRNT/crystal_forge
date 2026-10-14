@@ -4,6 +4,7 @@
  * manquant, la commande ou le script à lancer soi-même sur l'hôte.
  */
 import { errorMessage } from '$lib/domain/errors';
+import { hostMemoryInUse } from '$lib/domain/sizes';
 import { hasFirewallFlag, INTERNET_PROBE_URL, parseInternetProbe } from '$lib/domain/firewall';
 import { inCidr } from '$lib/domain/network';
 import { ReadCommand } from '../gateways';
@@ -79,13 +80,15 @@ export class ServerHealthService {
 			safe(
 				async () => {
 					const n = await proxmox.nodeStatus();
-					const freePct = (n.memory.free / n.memory.total) * 100;
+					// Le cache ZFS (ARC) compte comme libre : il se vide dès qu'un processus a besoin de RAM.
+					const free = n.memory.total - hostMemoryInUse(n.memory);
+					const freePct = (free / n.memory.total) * 100;
 					const ram: HealthCheck = {
 						id: 'ram',
 						group: 'Proxmox',
 						label: 'Mémoire de l’hôte',
 						status: freePct < 10 ? 'error' : freePct < 20 ? 'warn' : 'ok',
-						detail: `${(n.memory.free / GiB).toFixed(1)} Go libres sur ${(n.memory.total / GiB).toFixed(1)} Go (${Math.round(freePct)} %).`,
+						detail: `${(free / GiB).toFixed(1)} Go libres sur ${(n.memory.total / GiB).toFixed(1)} Go (${Math.round(freePct)} %)${n.memory.arc > 0 ? `, cache ZFS de ${(n.memory.arc / GiB).toFixed(1)} Go compris` : ''}.`,
 						fix: freePct < 20 ? 'Réduisez la taille d’un projet ou arrêtez un CT inutilisé.' : undefined
 					};
 					const st = await proxmox.storageStatus();

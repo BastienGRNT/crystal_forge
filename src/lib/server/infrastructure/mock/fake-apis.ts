@@ -114,7 +114,7 @@ class FakeProxmox implements ProxmoxApi {
 		return {
 			cpu: 0.09 + 0.04 * Math.abs(Math.sin(t / 23)),
 			cpus: HOST.cpus,
-			memory: { total: HOST.memTotal, used, free: HOST.memTotal - used },
+			memory: { total: HOST.memTotal, used, free: HOST.memTotal - used, arc: 0 },
 			swap: { total: 8 * GiB, used: 1.2 * GiB },
 			rootfs: { total: HOST.rootfsTotal, used: HOST.rootfsUsed + world().backups.reduce((a, b) => a + b.size, 0) },
 			uptime: 86400 * 41 + Math.floor((Date.now() - world().createdAt) / 1000),
