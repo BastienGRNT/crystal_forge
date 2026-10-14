@@ -104,6 +104,7 @@ const ALLOWED_CONFIG_KEYS = new Set([
 	'swap',
 	'net0',
 	'onboot',
+	'protection',
 	'tags',
 	'description',
 	'nameserver',

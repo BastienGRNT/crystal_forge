@@ -304,7 +304,8 @@ class FakeProxmox implements ProxmoxApi {
 				baseCpu: 0.02 + Math.random() * 0.03,
 				baseMemRatio: 0.25,
 				startedAt: Date.now(),
-				config: { ...structuredClone(src.config), hostname: p.hostname, description: p.description ?? '', template: 0, protection: 0 }
+				// Comme Proxmox : la config est recopiée telle quelle, protection comprise.
+				config: { ...structuredClone(src.config), hostname: p.hostname, description: p.description ?? '', template: 0 }
 			});
 		});
 	}
@@ -355,6 +356,7 @@ class FakeProxmox implements ProxmoxApi {
 		await delay();
 		const g = this.#requireWrite(vmid, 'VM.Allocate');
 		if (g.status === 'running') throw new ExternalApiError('Proxmox', `CT ${vmid} is running - destroy failed`, 500);
+		if (Number(g.config.protection ?? 0) === 1) throw new ExternalApiError('Proxmox', `can't remove CT ${vmid} - protection mode enabled`, 500);
 		return this.#task([`Removing image: 100% complete...done.`, `purging CT ${vmid} from related configurations..`, 'TASK OK'], 1800, () => {
 			world().guests.delete(vmid);
 		});

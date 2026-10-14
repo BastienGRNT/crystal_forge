@@ -273,7 +273,16 @@ export class ProxmoxGateway {
 		});
 	}
 
-	destroy(vmid: number): Promise<string> {
+	async destroy(vmid: number): Promise<string> {
+		// Un CT protégé (protection=1, héritée du template) ne peut pas être supprimé :
+		// on retire d'abord la protection, via le garde (CT du pool, créé par Forge).
+		if (!this.#simulatedCts.has(vmid)) {
+			const facts = await this.#facts(vmid);
+			if (facts.exists && facts.pool === this.d.settings.get('proxmox.pool')) {
+				const cfg = await this.api.guestConfig(vmid, 'lxc');
+				if (Number(cfg.protection ?? 0) === 1) await this.configure(vmid, { protection: 0 });
+			}
+		}
 		return this.d.guard.run({
 			system: 'proxmox',
 			action: 'lxc.destroy',

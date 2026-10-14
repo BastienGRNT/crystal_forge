@@ -73,6 +73,9 @@ export const containerStep: StepDefinition = {
 			swap: size.swapMb,
 			net0: buildNet0({ ip, cidr: settings.int('network.cidr'), gateway: settings.get('network.gateway'), bridge: settings.get('proxmox.bridge') }),
 			onboot: 1,
+			// Le clone hérite de protection=1 du template (infra/03) : sans ce 0, Proxmox
+			// refuse ensuite le rollback et la suppression du projet (« CT is protected »).
+			protection: 0,
 			tags: 'forge'
 		});
 		ctx.log('success', `Configuré : ${size.cores} cœur(s), ${size.memoryMb} Mo RAM, ${size.swapMb} Mo swap, ${ip}/24 sur ${settings.get('proxmox.bridge')}.`);
