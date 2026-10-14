@@ -23,7 +23,8 @@ export const load: PageServerLoad = async () => {
 		sshFingerprint: pub ? publicKeyFingerprint(pub) : null,
 		ovhTokenUrl: ovhCreateTokenUrl(f.settings.get('ovh.endpoint'), zoneList, true),
 		ovhTokenUrlNoDelete: ovhCreateTokenUrl(f.settings.get('ovh.endpoint'), zoneList, false),
-		audit: f.guard.recentAudit(30)
+		audit: f.guard.recentAudit(30),
+		update: await f.selfUpdate.status().catch((err) => ({ error: errorMessage(err) }))
 	};
 };
 
@@ -65,6 +66,20 @@ export const actions: Actions = {
 	},
 	test: async () => {
 		return { report: await forge().connections.run() };
+	},
+	checkUpdate: async () => {
+		try {
+			return { updateCheck: await forge().selfUpdate.check() };
+		} catch (err) {
+			return fail(400, { section: 'update', error: errorMessage(err) });
+		}
+	},
+	applyUpdate: async () => {
+		try {
+			return { updateRequested: await forge().selfUpdate.request() };
+		} catch (err) {
+			return fail(400, { section: 'update', error: errorMessage(err) });
+		}
 	},
 	generateKey: async () => {
 		const kp = generateForgeKeyPair('forge');

@@ -11,6 +11,7 @@ import { JobQueries } from './application/use-cases/jobs';
 import { DatabaseService } from './application/use-cases/database';
 import { ServerHealthService } from './application/use-cases/server-health';
 import { UpgradeService } from './application/use-cases/upgrade';
+import { SelfUpdateService } from './application/use-cases/self-update';
 import { EventBus } from './application/events';
 import { DnsGateway, GithubGateway, ProxmoxGateway, ProxyGateway, ShellGateway } from './application/gateways';
 import { WriteGuard } from './application/guard';
@@ -44,6 +45,7 @@ export interface Forge extends ForgeServices {
 	database: DatabaseService;
 	health: ServerHealthService;
 	upgrade: UpgradeService;
+	selfUpdate: SelfUpdateService;
 	isDryRun(): boolean;
 	setDryRun(value: boolean): void;
 	resetMock(): void;
@@ -189,6 +191,7 @@ function build(): Forge {
 		database: new DatabaseService(services, engine),
 		health: new ServerHealthService(services),
 		upgrade: new UpgradeService(services, engine),
+		selfUpdate: new SelfUpdateService(services, engine),
 		isDryRun,
 		setDryRun(value: boolean) {
 			if (config.mode !== 'mock') throw new Error('Le DRY_RUN ne se change que par variable d’environnement en mode live.');

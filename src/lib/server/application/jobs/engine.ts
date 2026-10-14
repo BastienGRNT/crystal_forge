@@ -4,7 +4,7 @@
  * échec peut être repris à l'étape qui a échoué, ou annulé (rollback des ressources
  * créées par CE job uniquement).
  */
-import { errorMessage } from '$lib/domain/errors';
+import { errorMessage, UserFacingError } from '$lib/domain/errors';
 import type { JobRow, LogLevel } from '$server/infrastructure/db/schema';
 import type { JobWithSteps } from '$server/infrastructure/db/repositories';
 import { executionScope } from '../guard';
@@ -24,6 +24,8 @@ export class JobEngine {
 	#running = false;
 	#wake: (() => void) | null = null;
 	#current: { jobId: number; abort: AbortController } | null = null;
+	/** Raison de refuser tout nouveau job (mise à jour de Forge en cours), ou null. */
+	#blocker: () => string | null = () => null;
 
 	constructor(private readonly s: ForgeServices) {}
 
@@ -48,7 +50,14 @@ export class JobEngine {
 		this.#kick();
 	}
 
+	/** Bloque les nouveaux jobs tant que `reason()` renvoie un message (ex. reconstruction de Forge). */
+	setBlocker(reason: () => string | null): void {
+		this.#blocker = reason;
+	}
+
 	enqueue(input: { type: string; projectId: number | null; params?: JobParams; dryRun?: boolean }): JobWithSteps {
+		const blocked = this.#blocker();
+		if (blocked) throw new UserFacingError(blocked);
 		const def = JOB_DEFINITIONS[input.type];
 		if (!def) throw new Error(`Type de job inconnu : ${input.type}`);
 		const params = input.params ?? {};
@@ -67,6 +76,8 @@ export class JobEngine {
 
 	/** Reprend un job en échec (ou interrompu) à partir de l'étape en échec. */
 	resume(jobId: number): void {
+		const blocked = this.#blocker();
+		if (blocked) throw new UserFacingError(blocked);
 		const job = this.#mustGet(jobId);
 		if (job.status !== 'failed') throw new Error('Seul un job en échec peut être repris.');
 		for (const step of job.steps) {

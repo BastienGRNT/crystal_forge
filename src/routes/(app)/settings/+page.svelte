@@ -15,6 +15,7 @@
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import History from '@lucide/svelte/icons/history';
+	import Download from '@lucide/svelte/icons/download';
 	import PageHeader from '$lib/components/molecules/page-header.svelte';
 	import SectionCard from '$lib/components/molecules/section-card.svelte';
 	import SettingField from '$lib/components/molecules/setting-field.svelte';
@@ -33,6 +34,7 @@
 	import * as Alert from '$lib/components/atoms/ui/alert';
 	import Spinner from '$lib/components/atoms/spinner.svelte';
 	import type { CheckSection, PermissionRow } from '$server/application/use-cases/connections';
+	import type { UpdateCheck } from '$server/application/use-cases/self-update';
 
 	let { data, form } = $props();
 	const v = $derived(data.values);
@@ -44,6 +46,43 @@
 	let keyConfirm = $state(false);
 	let keyForm: HTMLFormElement | undefined = $state();
 	let dryForm: HTMLFormElement | undefined = $state();
+
+	// --- Mise à jour de Forge ---------------------------------------------------------
+	const update = $derived('error' in data.update ? null : data.update);
+	let updateCheck = $state<UpdateCheck | null>(null);
+	let checking = $state(false);
+	let updateConfirm = $state(false);
+	let updateForm: HTMLFormElement | undefined = $state();
+	const updating = $derived(update?.run?.state === 'pending' || update?.run?.state === 'running');
+	const UPDATE_STATE: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
+		pending: { label: 'En attente', variant: 'secondary' },
+		running: { label: 'En cours', variant: 'secondary' },
+		done: { label: 'Terminée', variant: 'default' },
+		failed: { label: 'Échec', variant: 'destructive' }
+	};
+	// Pendant la mise à jour, on rafraîchit : Forge redémarre, puis la page revient d'elle-même.
+	$effect(() => {
+		if (!updating) return;
+		const t = setInterval(() => invalidateAll().catch(() => {}), 4000);
+		return () => clearInterval(t);
+	});
+
+	const checkHandler: SubmitFunction = () => {
+		checking = true;
+		return async ({ result }) => {
+			checking = false;
+			if (result.type === 'success') updateCheck = (result.data as { updateCheck: UpdateCheck }).updateCheck;
+			else if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? 'Vérification impossible');
+		};
+	};
+
+	const applyHandler: SubmitFunction = () => {
+		return async ({ result }) => {
+			if (result.type === 'success') toast.success('Mise à jour lancée : Forge va redémarrer.');
+			else if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? 'Mise à jour impossible');
+			await invalidateAll();
+		};
+	};
 
 	const saveHandler: SubmitFunction = () => {
 		return async ({ result, update }) => {
@@ -74,7 +113,8 @@
 		{ value: 'ovh', label: 'OVH', icon: Globe },
 		{ value: 'npm', label: 'NPM', icon: Waypoints },
 		{ value: 'ssh', label: 'Clé SSH', icon: KeySquare },
-		{ value: 'security', label: 'Sécurité', icon: ShieldCheck }
+		{ value: 'security', label: 'Sécurité', icon: ShieldCheck },
+		{ value: 'update', label: 'Mise à jour', icon: Download }
 	];
 </script>
 
@@ -366,7 +406,72 @@
 			</SectionCard>
 		</form>
 	</Tabs.Content>
+
+	<!-- Mise à jour de Forge -->
+	<Tabs.Content value="update" class="space-y-6">
+		<SectionCard title="Mettre à jour Forge" description="Télécharge la dernière version du dépôt de Forge avec le jeton GitHub ; le service forge-update du CT 150 reconstruit l'image et redémarre le conteneur (retour automatique à la version précédente en cas d'échec)." icon={Download}>
+			{#if 'error' in data.update}
+				<Alert.Root variant="destructive"><Alert.Description>{data.update.error}</Alert.Description></Alert.Root>
+			{:else if update}
+				<dl class="space-y-3 text-sm">
+					<div class="flex items-center justify-between gap-4">
+						<dt class="font-medium">Dépôt</dt>
+						<dd class="font-mono text-xs">{update.repo}@{update.branch}</dd>
+					</div>
+					<div class="flex items-center justify-between gap-4">
+						<dt class="font-medium">Version installée</dt>
+						<dd class="font-mono text-xs">{update.current ? update.current.sha.slice(0, 7) : 'inconnue (installée à la main)'}</dd>
+					</div>
+					{#if updateCheck}
+						<div class="flex items-center justify-between gap-4">
+							<dt class="font-medium">Dernière version</dt>
+							<dd class="text-right text-xs">
+								<span class="font-mono">{updateCheck.latest.sha.slice(0, 7)}</span> — {updateCheck.latest.message.split('\n')[0]}
+								{#if updateCheck.upToDate}<Badge variant="outline" class="ml-2">À jour</Badge>{/if}
+							</dd>
+						</div>
+					{/if}
+					{#if update.run}
+						<div class="flex items-center justify-between gap-4">
+							<dt class="font-medium">Dernière mise à jour</dt>
+							<dd class="flex items-center gap-2 text-xs">
+								{#if updating}<Spinner />{/if}
+								<Badge variant={UPDATE_STATE[update.run.state]?.variant ?? 'outline'}>{UPDATE_STATE[update.run.state]?.label ?? update.run.state}</Badge>
+								<span class="font-mono">{update.run.sha.slice(0, 7)}</span>
+								{#if update.run.at}<RelativeTime value={Date.parse(update.run.at)} />{/if}
+							</dd>
+						</div>
+						{#if update.run.message}<p class="text-xs text-muted-foreground">{update.run.message}</p>{/if}
+					{/if}
+				</dl>
+				{#if update.installHint}
+					<Alert.Root class="mt-4 border-warning/40 text-warning"><Alert.Description class="text-warning/90">{update.installHint}</Alert.Description></Alert.Root>
+				{/if}
+				{#if update.log.length}
+					<pre class="scrollbar-thin mt-4 max-h-72 overflow-auto rounded-md bg-muted p-3 font-mono text-xs leading-relaxed">{update.log.join('\n')}</pre>
+				{/if}
+			{/if}
+			{#snippet footer()}
+				<div class="flex flex-wrap gap-2">
+					<form method="POST" action="?/checkUpdate" use:enhance={checkHandler}>
+						<Button type="submit" variant="outline" size="sm" disabled={checking}>{#if checking}<Spinner />{:else}<RefreshCw />{/if} Vérifier</Button>
+					</form>
+					<form method="POST" action="?/applyUpdate" bind:this={updateForm} use:enhance={applyHandler}>
+						<Button type="button" size="sm" disabled={!update?.installed || updating || updateCheck?.upToDate} onclick={() => (updateConfirm = true)}><Download /> Mettre à jour</Button>
+					</form>
+				</div>
+			{/snippet}
+		</SectionCard>
+	</Tabs.Content>
 </Tabs.Root>
+
+<ConfirmDialog
+	bind:open={updateConfirm}
+	title="Mettre à jour Forge ?"
+	description="Forge sera reconstruit puis redémarré (une à trois minutes d'interruption de l'interface). Aucun job ne doit être en cours ; les nouveaux jobs sont refusés pendant la mise à jour. En cas d'échec, la version précédente est remise en place."
+	confirmLabel="Mettre à jour"
+	onConfirm={() => updateForm?.requestSubmit()}
+/>
 
 <ConfirmDialog
 	bind:open={keyConfirm}

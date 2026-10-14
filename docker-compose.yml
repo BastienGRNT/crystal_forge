@@ -17,8 +17,12 @@ services:
       DRY_RUN: ${DRY_RUN:-true}
       PORT: 3000
       ORIGIN: ${ORIGIN:-http://10.10.10.15:3000}
+      FORGE_UPDATES_DIR: /updates
     volumes:
       - forge-data:/data
+      # Échange avec le service forge-update du CT 150 (bouton « Mettre à jour Forge »).
+      # Créé par infra/08-forge-updater.sh (propriétaire 1000 = utilisateur node).
+      - ./updates:/updates
 
 volumes:
   forge-data:

@@ -24,3 +24,4 @@ vite.config.ts.timestamp-*
 
 # Base SQLite locale
 /data
+/updates

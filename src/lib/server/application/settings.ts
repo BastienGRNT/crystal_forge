@@ -59,6 +59,9 @@ export const SETTING_DEFS = {
 	'letsencrypt.email': { default: '' },
 	'ssh.privateKey': { default: '', secret: true },
 	'ssh.publicKey': { default: '' },
+	/** Dépôt et branche de Forge lui-même (bouton « Mettre à jour Forge »). */
+	'forge.updateRepo': { default: 'BastienGRNT/crystal_forge' },
+	'forge.updateBranch': { default: 'main' },
 	/** Correspondance CT hors Forge → dépôt GitHub (JSON { "402": "BastienGRNT/crystal_wallet" }). */
 	'dashboard.repoMap': { default: '{}' },
 	/** Surcharge du DRY_RUN — uniquement en mode mock. */

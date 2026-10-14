@@ -242,6 +242,24 @@ export class GithubClient implements GithubApi {
 		}
 	}
 
+	async latestCommit(owner: string, repo: string, branch: string) {
+		try {
+			const c = (await this.#o.rest.repos.getBranch({ owner, repo, branch })).data.commit;
+			return { sha: c.sha, message: c.commit.message, date: c.commit.committer?.date ?? null };
+		} catch (e) {
+			wrap(e, `branche ${branch} de ${owner}/${repo}`);
+		}
+	}
+
+	async downloadTarball(owner: string, repo: string, ref: string) {
+		try {
+			const res = await this.#o.rest.repos.downloadTarballArchive({ owner, repo, ref });
+			return Buffer.from(res.data as ArrayBuffer);
+		} catch (e) {
+			wrap(e, `archive de ${owner}/${repo}@${ref.slice(0, 7)}`);
+		}
+	}
+
 	async createRegistrationToken(owner: string, repo: string) {
 		try {
 			const res = await this.#o.rest.actions.createRegistrationTokenForRepo({ owner, repo });

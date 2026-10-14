@@ -606,6 +606,21 @@ class FakeGithub implements GithubApi {
 		return [...repoOf(owner, name).variables.entries()].map(([n, value]) => ({ name: n, value }));
 	}
 
+	async latestCommit(owner: string, name: string, branch: string) {
+		await delay();
+		if (`${owner}/${name}`.toLowerCase() === 'bastiengrnt/crystal_forge') {
+			const sha = createHash('sha1').update(`forge-${Math.floor(world().createdAt / 1000)}`).digest('hex');
+			return { sha, message: 'fix: vérification HTTPS via NPM (démo)', date: new Date(world().createdAt).toISOString() };
+		}
+		const r = repoOf(owner, name);
+		return { sha: createHash('sha1').update(`${r.name}-${r.commits}`).digest('hex'), message: `dernier commit de ${branch}`, date: new Date(r.pushedAt).toISOString() };
+	}
+
+	async downloadTarball() {
+		await delay(300, 600);
+		return gzipSync(Buffer.from('archive simulée'));
+	}
+
 	async createRegistrationToken(owner: string, name: string) {
 		await delay();
 		repoOf(owner, name);

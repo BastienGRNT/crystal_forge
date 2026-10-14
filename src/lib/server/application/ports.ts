@@ -190,6 +190,10 @@ export interface GithubApi {
 	getPublicKey(owner: string, repo: string): Promise<{ keyId: string; key: string }>;
 	getSecretMeta(owner: string, repo: string, name: string): Promise<{ updatedAt: string } | null>;
 	listVariables(owner: string, repo: string): Promise<{ name: string; value: string }[]>;
+	/** Dernier commit d'une branche. */
+	latestCommit(owner: string, repo: string, branch: string): Promise<{ sha: string; message: string; date: string | null }>;
+	/** Archive tar.gz du dépôt à un commit donné (dossier racine « owner-repo-sha/ »). */
+	downloadTarball(owner: string, repo: string, ref: string): Promise<Buffer>;
 
 	createRegistrationToken(owner: string, repo: string): Promise<{ token: string; expiresAt: string }>;
 	createRemoveToken(owner: string, repo: string): Promise<{ token: string; expiresAt: string }>;

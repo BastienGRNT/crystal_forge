@@ -17,6 +17,8 @@ export interface AppConfig {
 	masterKeyIsDevFallback: boolean;
 	allowedSources: string[];
 	secureCookies: boolean;
+	/** Dossier d'échange avec le service de mise à jour du CT 150 (bind mount /opt/forge/updates). */
+	updatesDir: string;
 }
 
 function parseBool(v: string | undefined, fallback: boolean): boolean {
@@ -59,7 +61,8 @@ export function getConfig(): AppConfig {
 			.split(',')
 			.map((s) => s.trim())
 			.filter(Boolean),
-		secureCookies: parseBool(env.FORGE_SECURE_COOKIES, false)
+		secureCookies: parseBool(env.FORGE_SECURE_COOKIES, false),
+		updatesDir: env.FORGE_UPDATES_DIR || (mode === 'mock' ? './data/updates' : '/updates')
 	};
 	return cached;
 }
