@@ -3,6 +3,7 @@ import {
 	assertCanCloneCt,
 	assertCanCreateDnsRecord,
 	assertCanCreateProxyHost,
+	assertCanRepointProxyHost,
 	assertCanModifyCt,
 	assertOwned,
 	assertSafeCommand,
@@ -87,6 +88,15 @@ describe('NPM / ressources possédées', () => {
 		expect(() => assertCanCreateProxyHost(ctx, { domainNames: ['notes.bastiengrnt.fr'], forwardHost: '10.10.10.60', forwardPort: 3000 }, ['wallet.bastiengrnt.fr'])).not.toThrow();
 		expect(() => assertCanCreateProxyHost(ctx, { domainNames: ['x.fr'], forwardHost: '10.10.10.42', forwardPort: 3000 }, [])).toThrow();
 		expect(() => assertCanCreateProxyHost(ctx, { domainNames: ['Wallet.bastiengrnt.fr'], forwardHost: '10.10.10.60', forwardPort: 3000 }, ['wallet.bastiengrnt.fr'])).toThrow(/existe déjà/);
+	});
+	it('ne change que le port d’un proxy host Forge, vers le même CT', () => {
+		const own = [{ type: 'npm_proxy_host' as const, externalId: '12', projectId: 1 }];
+		const host = { id: 12, forwardHost: '10.10.10.61' };
+		expect(() => assertCanRepointProxyHost(ctx, host, { forwardHost: '10.10.10.61', forwardPort: 3000 }, own)).not.toThrow();
+		expect(() => assertCanRepointProxyHost(ctx, { id: 19, forwardHost: '10.10.10.42' }, { forwardHost: '10.10.10.42', forwardPort: 3000 }, own)).toThrow(/pas été créé par Forge/);
+		expect(() => assertCanRepointProxyHost(ctx, host, { forwardHost: '10.10.10.62', forwardPort: 3000 }, own)).toThrow(/seul son port/);
+		expect(() => assertCanRepointProxyHost(ctx, { id: 12, forwardHost: '10.10.10.42' }, { forwardHost: '10.10.10.42', forwardPort: 3000 }, own)).toThrow(/pas un CT Forge/);
+		expect(() => assertCanRepointProxyHost(ctx, host, { forwardHost: '10.10.10.61', forwardPort: 70000 }, own)).toThrow(/Port invalide/);
 	});
 	it("refuse de supprimer une ressource qu'il n'a pas créée", () => {
 		const own = [{ type: 'npm_proxy_host' as const, externalId: '12', projectId: 1 }];

@@ -248,10 +248,10 @@ export class ProjectService {
 		const postDeploy = input.postDeploy.trim();
 		if (postDeploy) assertSafeCommand(postDeploy);
 		if (!isValidServiceName(input.appService)) throw new UserFacingError('Nom de service invalide.');
-		if (input.appPort !== p.appPort && this.s.repos.domains.byProject(p.id).some((d) => d.status === 'active')) {
-			throw new UserFacingError("Changer le port demande de recréer les proxy hosts : retirez puis rajoutez les domaines (non automatisé en v1).");
-		}
+		const portChanged = input.appPort !== p.appPort;
 		this.s.repos.projects.update(p.id, { appPort: input.appPort, postDeploy: postDeploy || null, appService: input.appService });
+		// Nouveau port : pare-feu et proxy hosts suivent, puis le contrôle HTTPS le vérifie.
+		if (portChanged) return this.engine.enqueue({ type: 'change_port', projectId: p.id, params: { redeploy, forceDispatch: true } }).id;
 		return this.engine.enqueue({ type: 'sync_config', projectId: p.id, params: { redeploy, forceDispatch: true, skipHttpCheck: true } }).id;
 	}
 

@@ -207,6 +207,28 @@ export function assertCanCreateProxyHost(
 	}
 }
 
+/**
+ * Changement de port d'un projet : seul le port d'un proxy host créé par Forge peut changer,
+ * et il doit continuer de viser le même CT Forge (jamais un autre projet ni la prod).
+ */
+export function assertCanRepointProxyHost(
+	ctx: SafetyContext,
+	host: { id: number; forwardHost: string },
+	req: { forwardHost: string; forwardPort: number },
+	owned: OwnedResource[]
+): void {
+	assertOwned('npm_proxy_host', host.id, owned, 'Le proxy host');
+	if (!isIpv4(req.forwardHost) || !isInIpRange(req.forwardHost, ctx.ipRange)) {
+		throw new SafetyViolation('npm.forward', `La cible ${req.forwardHost} n'est pas un CT Forge (${ctx.ipRange.start}-${ctx.ipRange.end}).`);
+	}
+	if (host.forwardHost !== req.forwardHost) {
+		throw new SafetyViolation('npm.retarget', `Le proxy host #${host.id} vise ${host.forwardHost}, pas ${req.forwardHost} : seul son port peut changer.`);
+	}
+	if (!Number.isInteger(req.forwardPort) || req.forwardPort < 1 || req.forwardPort > 65535) {
+		throw new SafetyViolation('npm.port', `Port invalide : ${req.forwardPort}`);
+	}
+}
+
 // --- Commandes (SSH, workflow) ----------------------------------------------------
 
 const FORBIDDEN_COMMAND_PATTERNS: { re: RegExp; reason: string }[] = [

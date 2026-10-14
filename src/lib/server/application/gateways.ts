@@ -12,6 +12,7 @@ import {
 	assertCanCloneCt,
 	assertCanCreateDnsRecord,
 	assertCanCreateProxyHost,
+	assertCanRepointProxyHost,
 	assertCanModifyCt,
 	assertForgeSecretName,
 	assertForgeVariableName,
@@ -638,6 +639,34 @@ export class ProxyGateway {
 				forwardScheme: 'http',
 				forwardHost: input.forwardHost,
 				forwardPort: input.forwardPort,
+				certificateId: -1,
+				sslForced: true,
+				enabled: true,
+				nginxOnline: null,
+				nginxError: null,
+				certificate: null
+			})
+		});
+	}
+
+	/** Nouveau port de l'app : le proxy host (créé par Forge) garde son domaine, son certificat et sa cible. */
+	repointProxyHost(id: number, forwardHost: string, forwardPort: number): Promise<NpmProxyHost> {
+		return this.#run({
+			system: 'npm',
+			action: 'proxy-host.update',
+			summary: `Rediriger le proxy host #${id} vers http://${forwardHost}:${forwardPort}`,
+			check: async () => {
+				const host = (await this.api.listProxyHosts()).find((h) => h.id === id);
+				if (!host) throw new SafetyViolation('npm.missing', `Le proxy host #${id} n'existe plus dans NPM.`);
+				assertCanRepointProxyHost(this.d.settings.safetyContext(), host, { forwardHost, forwardPort }, this.d.ownership.owned('npm_proxy_host'));
+			},
+			execute: () => this.api.updateProxyHost(id, { forward_host: forwardHost, forward_port: forwardPort }),
+			simulate: () => ({
+				id,
+				domainNames: [],
+				forwardScheme: 'http',
+				forwardHost,
+				forwardPort,
 				certificateId: -1,
 				sslForced: true,
 				enabled: true,

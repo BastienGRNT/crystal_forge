@@ -60,7 +60,7 @@
 						<Button
 							variant="ghost"
 							size="icon-sm"
-							title="Retirer"
+							title={data.view.domains.length <= 1 ? 'Dernier domaine du projet : ajoutez-en un autre avant de le retirer (pour changer de port : Paramètres)' : 'Retirer'}
 							disabled={!!data.activeJob || data.view.domains.length <= 1}
 							onclick={() => {
 								toRemove = { id: d.id, fqdn: d.fqdn };

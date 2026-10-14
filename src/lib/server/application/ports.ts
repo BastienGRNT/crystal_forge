@@ -304,6 +304,8 @@ export interface NpmApi {
 	listCertificates(): Promise<NpmCertificate[]>;
 
 	createProxyHost(payload: NpmCreateProxyHost): Promise<NpmProxyHost>;
+	/** PUT partiel : NPM ne modifie que les champs envoyés et régénère la config nginx. */
+	updateProxyHost(id: number, patch: { forward_host: string; forward_port: number }): Promise<NpmProxyHost>;
 	deleteProxyHost(id: number): Promise<void>;
 	deleteCertificate(id: number): Promise<void>;
 }

@@ -69,7 +69,7 @@ export class NpmClient implements NpmApi {
 		return data.token;
 	}
 
-	async #call<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown, timeoutMs = 20_000): Promise<T> {
+	async #call<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown, timeoutMs = 20_000): Promise<T> {
 		const token = await this.#auth();
 		const res = await httpRequest('NPM', `${this.#base}${path}`, {
 			method,
@@ -121,6 +121,10 @@ export class NpmClient implements NpmApi {
 	async createProxyHost(payload: NpmCreateProxyHost) {
 		// La demande de certificat Let's Encrypt est faite dans la même requête : délai long.
 		return toHost(await this.#call<RawHost>('POST', '/nginx/proxy-hosts', payload, 180_000));
+	}
+
+	async updateProxyHost(id: number, patch: { forward_host: string; forward_port: number }) {
+		return toHost(await this.#call<RawHost>('PUT', `/nginx/proxy-hosts/${id}`, patch));
 	}
 
 	async deleteProxyHost(id: number) {

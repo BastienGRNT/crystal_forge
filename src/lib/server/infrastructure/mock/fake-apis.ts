@@ -876,6 +876,15 @@ class FakeNpm implements NpmApi {
 		return this.#toHost(host);
 	}
 
+	async updateProxyHost(id: number, patch: { forward_host: string; forward_port: number }) {
+		await delay();
+		const host = world().npmHosts.find((h) => h.id === id);
+		if (!host) throw new ExternalApiError('NPM', `PUT /nginx/proxy-hosts/${id} : HTTP 404 Not Found`, 404);
+		host.forwardHost = patch.forward_host;
+		host.forwardPort = patch.forward_port;
+		return this.#toHost(host);
+	}
+
 	async deleteProxyHost(id: number) {
 		await delay();
 		const w = world();

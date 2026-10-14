@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createFakeApis } from '$server/infrastructure/mock/fake-apis';
 import { resetWorld, world } from '$server/infrastructure/mock/world';
-import { DbCommand, ProxmoxGateway } from './gateways';
+import { DbCommand, ProxmoxGateway, ProxyGateway } from './gateways';
 import { WriteGuard } from './guard';
 import { SettingsService, type SettingsStore } from './settings';
 
@@ -67,6 +67,36 @@ describe('ProxmoxGateway — CT cloné depuis un template protégé', () => {
 		const pve = gateway();
 		await expect(pve.destroy(402)).rejects.toThrow(/production protégé/);
 		expect(world().guests.has(402)).toBe(true);
+	});
+});
+
+/** Passerelle NPM réelle (garde hors DRY_RUN) : seul le proxy host « notes » appartient à Forge. */
+function proxyGateway() {
+	const apis = createFakeApis();
+	const settings = new SettingsService(memoryStore(), { encrypt: (s) => s, decrypt: (s) => s });
+	const guard = new WriteGuard(() => false, (s) => s);
+	const notes = world().npmHosts.find((h) => h.domainNames.includes('notes.bastiengrnt.fr'));
+	const ownership = { owned: () => [{ type: 'npm_proxy_host' as const, externalId: String(notes?.id), projectId: 1 }] };
+	const projects = { forgeIps: () => ['10.10.10.60'], forgeRepos: () => [] };
+	return { npm: new ProxyGateway({ apis: () => apis, guard, settings, ownership, projects }), notes };
+}
+
+describe('ProxyGateway — changement de port', () => {
+	beforeEach(() => resetWorld());
+
+	it('redirige un proxy host Forge vers le nouveau port, sans toucher au certificat', async () => {
+		const { npm, notes } = proxyGateway();
+		const cert = notes?.certificateId;
+		await npm.repointProxyHost(notes?.id ?? 0, '10.10.10.60', 8080);
+		const after = world().npmHosts.find((h) => h.id === notes?.id);
+		expect(after).toMatchObject({ forwardHost: '10.10.10.60', forwardPort: 8080, certificateId: cert });
+	});
+
+	it('refuse un proxy host de la prod, même vers le même CT', async () => {
+		const { npm } = proxyGateway();
+		const wallet = world().npmHosts.find((h) => h.domainNames.includes('wallet.bastiengrnt.fr'));
+		await expect(npm.repointProxyHost(wallet?.id ?? 0, '10.10.10.42', 4000)).rejects.toThrow(/pas été créé par Forge/);
+		expect(world().npmHosts.find((h) => h.id === wallet?.id)?.forwardPort).toBe(3000);
 	});
 });
 

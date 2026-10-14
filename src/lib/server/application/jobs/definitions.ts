@@ -4,7 +4,7 @@ import { runnerStep } from './steps/runner';
 import { secretsStep } from './steps/secrets';
 import { workflowStep } from './steps/workflow';
 import { dnsStep } from './steps/dns';
-import { proxyStep } from './steps/proxy';
+import { proxyRepointStep, proxyStep } from './steps/proxy';
 import { pipelineStep } from './steps/pipeline';
 import { firewallStep } from './steps/firewall';
 import { dbBackupStep, dbRestoreStep } from './steps/database';
@@ -35,6 +35,7 @@ export const STEPS: Record<string, StepDefinition> = Object.fromEntries(
 		workflowStep,
 		dnsStep,
 		proxyStep,
+		proxyRepointStep,
 		pipelineStep,
 		powerStep,
 		removeDomainStep,
@@ -75,6 +76,12 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
 		type: 'sync_config',
 		label: 'Mise à jour de la configuration',
 		steps: (p) => (p.redeploy ? ['secrets', 'pipeline'] : ['secrets'])
+	},
+	change_port: {
+		type: 'change_port',
+		label: 'Changement de port',
+		// Pare-feu d'abord : NPM doit pouvoir joindre le nouveau port avant d'y être redirigé.
+		steps: (p) => ['firewall', 'npm_repoint', 'secrets', ...(p.redeploy ? ['pipeline'] : [])]
 	},
 	add_domain: {
 		type: 'add_domain',

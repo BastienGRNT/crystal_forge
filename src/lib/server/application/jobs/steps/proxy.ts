@@ -50,3 +50,34 @@ export const proxyStep: StepDefinition = {
 		}
 	}
 };
+
+/** Changement de port : chaque proxy host créé par Forge pour le projet vise le nouveau port. */
+export const proxyRepointStep: StepDefinition = {
+	key: 'npm_repoint',
+	label: 'Proxy NPM : nouveau port',
+	async run(ctx) {
+		const { proxy, repos } = ctx.services;
+		const p = ctx.project();
+		const ip = requireIp(ctx);
+		const owned = repos.resources.active({ projectId: p.id }).filter((r) => r.type === 'npm_proxy_host');
+		if (owned.length === 0) {
+			ctx.log('info', 'Aucun proxy host créé par Forge : rien à rediriger.');
+			return;
+		}
+		const hosts = await proxy.api.listProxyHosts();
+		for (const r of owned) {
+			const host = hosts.find((h) => String(h.id) === r.externalId);
+			if (!host) {
+				ctx.log('warn', `Proxy host #${r.externalId} introuvable dans NPM (supprimé à la main ?) : ignoré.`);
+				continue;
+			}
+			const name = host.domainNames.join(', ');
+			if (host.forwardHost === ip && host.forwardPort === p.appPort) {
+				ctx.log('info', `${name} : vise déjà http://${ip}:${p.appPort}.`);
+				continue;
+			}
+			await proxy.repointProxyHost(host.id, ip, p.appPort);
+			ctx.log('success', `${name} : http://${host.forwardHost}:${host.forwardPort} → http://${ip}:${p.appPort} (certificat conservé).`);
+		}
+	}
+};
