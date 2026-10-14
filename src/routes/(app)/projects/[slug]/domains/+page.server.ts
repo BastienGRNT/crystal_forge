@@ -26,6 +26,17 @@ export const actions: Actions = {
 		}
 		redirect(303, `/jobs/${id}`);
 	},
+	repair: async ({ params, request }) => {
+		const f = forge();
+		const domainId = Number((await request.formData()).get('domainId'));
+		let id: number;
+		try {
+			id = f.projects.repairDomain(f.projects.get(params.slug), domainId);
+		} catch (err) {
+			return fail(400, { error: errorMessage(err) });
+		}
+		redirect(303, `/jobs/${id}`);
+	},
 	remove: async ({ params, request }) => {
 		const f = forge();
 		const domainId = Number((await request.formData()).get('domainId'));

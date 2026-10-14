@@ -290,6 +290,14 @@ export class ProjectService {
 		return this.engine.enqueue({ type: 'add_domain', projectId: p.id, params: { domainIds: [row.id] } }).id;
 	}
 
+	/** Recrée le proxy host d'un domaine actif supprimé à la main dans NPM (certificat réutilisé s'il existe). */
+	repairDomain(p: ProjectRow, domainId: number): number {
+		this.#assertNoActiveJob(p);
+		const d = this.s.repos.domains.get(domainId);
+		if (!d || d.projectId !== p.id) throw new UserFacingError('Domaine introuvable.');
+		return this.engine.enqueue({ type: 'repair_domain', projectId: p.id, params: { domainIds: [d.id] } }).id;
+	}
+
 	removeDomain(p: ProjectRow, domainId: number): number {
 		this.#assertNoActiveJob(p);
 		const d = this.s.repos.domains.get(domainId);

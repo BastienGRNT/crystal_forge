@@ -1,4 +1,5 @@
 /** Étapes de maintenance : alimentation, retrait de domaine, suppression de projet, rollback. */
+import { ExternalApiError } from '$lib/domain/errors';
 import { FORGE_SECRET_NAME } from '$lib/domain/safety-policy';
 import type { ResourceRow } from '$server/infrastructure/db/schema';
 import type { PowerAction } from '../../ports';
@@ -63,12 +64,12 @@ async function teardownResource(ctx: StepContext, r: ResourceRow): Promise<void>
 			break;
 		}
 		case 'npm_proxy_host':
-			await proxy.deleteProxyHost(Number(r.externalId));
-			ctx.log('success', `Proxy host #${r.externalId} (${meta(r).fqdn ?? ''}) supprimé.`);
+			if (await alreadyGone(() => proxy.deleteProxyHost(Number(r.externalId)))) ctx.log('info', `Proxy host #${r.externalId} (${meta(r).fqdn ?? ''}) déjà absent de NPM.`);
+			else ctx.log('success', `Proxy host #${r.externalId} (${meta(r).fqdn ?? ''}) supprimé.`);
 			break;
 		case 'npm_certificate':
-			await proxy.deleteCertificate(Number(r.externalId));
-			ctx.log('success', `Certificat #${r.externalId} supprimé.`);
+			if (await alreadyGone(() => proxy.deleteCertificate(Number(r.externalId)))) ctx.log('info', `Certificat #${r.externalId} déjà absent de NPM.`);
+			else ctx.log('success', `Certificat #${r.externalId} supprimé.`);
 			break;
 		case 'ovh_record': {
 			const zone = repoFull;
@@ -86,6 +87,17 @@ async function teardownResource(ctx: StepContext, r: ResourceRow): Promise<void>
 		}
 	}
 	if (!ctx.dryRun) repos.resources.markDeleted(r.type, r.externalId);
+}
+
+/** true si NPM répond 404 : la ressource a déjà été supprimée à la main. */
+async function alreadyGone(del: () => Promise<void>): Promise<boolean> {
+	try {
+		await del();
+		return false;
+	} catch (err) {
+		if (err instanceof ExternalApiError && err.status === 404) return true;
+		throw err;
+	}
 }
 
 /** Ordre de suppression : ce qui dépend du CT d'abord, le CT en dernier. */

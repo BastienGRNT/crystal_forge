@@ -5,6 +5,7 @@
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Plus from '@lucide/svelte/icons/plus';
+	import Wrench from '@lucide/svelte/icons/wrench';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import SectionCard from '$lib/components/molecules/section-card.svelte';
 	import StatusBadge from '$lib/components/molecules/status-badge.svelte';
@@ -46,6 +47,7 @@
 						<p class="mt-1 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
 							{#if d.forward}<span class="font-mono">→ {d.forward}</span>{/if}
 							{#if d.proxyHostId}<span>proxy host #{d.proxyHostId}</span>{/if}
+							{#if d.status === 'active' && !d.proxyHostId && !data.view.error}<span class="text-warning">Proxy host introuvable dans NPM (supprimé à la main ?)</span>{/if}
 						</p>
 					</div>
 					<div class="flex items-center gap-3">
@@ -56,6 +58,12 @@
 							</span>
 						{:else if d.status === 'active'}
 							<span class="text-xs text-muted-foreground">Certificat : inconnu</span>
+						{/if}
+						{#if d.status === 'active' && !d.proxyHostId && !data.view.error}
+							<form method="POST" action="?/repair" use:enhance>
+								<input type="hidden" name="domainId" value={d.id} />
+								<Button type="submit" variant="outline" size="sm" disabled={!!data.activeJob}><Wrench /> Recréer le proxy</Button>
+							</form>
 						{/if}
 						<Button
 							variant="ghost"

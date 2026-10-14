@@ -88,6 +88,11 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
 		label: 'Ajout de domaine',
 		steps: () => ['dns', 'npm']
 	},
+	repair_domain: {
+		type: 'repair_domain',
+		label: 'Réparation du proxy',
+		steps: () => ['npm']
+	},
 	remove_domain: {
 		type: 'remove_domain',
 		label: 'Retrait de domaine',

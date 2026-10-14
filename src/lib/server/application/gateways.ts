@@ -601,13 +601,14 @@ export class ProxyGateway {
 		return this.api.listCertificates();
 	}
 
-	async createProxyHost(input: { domain: string; forwardHost: string; forwardPort: number; email: string }): Promise<NpmProxyHost> {
+	/** `certificateId` : certificat Let's Encrypt créé par Forge à réutiliser (sinon, nouvelle demande). */
+	async createProxyHost(input: { domain: string; forwardHost: string; forwardPort: number; email: string; certificateId?: number }): Promise<NpmProxyHost> {
 		const payload: NpmCreateProxyHost = {
 			domain_names: [input.domain],
 			forward_scheme: 'http',
 			forward_host: input.forwardHost,
 			forward_port: input.forwardPort,
-			certificate_id: 'new',
+			certificate_id: input.certificateId ?? 'new',
 			ssl_forced: true,
 			http2_support: true,
 			block_exploits: true,
@@ -623,8 +624,9 @@ export class ProxyGateway {
 		return this.#run({
 			system: 'npm',
 			action: 'proxy-host.create',
-			summary: `Créer le proxy host ${input.domain} → http://${input.forwardHost}:${input.forwardPort} (Let's Encrypt, SSL forcé, HTTP/2, websockets)`,
+			summary: `Créer le proxy host ${input.domain} → http://${input.forwardHost}:${input.forwardPort} (${input.certificateId ? `certificat #${input.certificateId} réutilisé` : "Let's Encrypt"}, SSL forcé, HTTP/2, websockets)`,
 			check: async () => {
+				if (input.certificateId) assertOwned('npm_certificate', input.certificateId, this.d.ownership.owned('npm_certificate'), 'Le certificat');
 				const hosts = await this.api.listProxyHosts();
 				assertCanCreateProxyHost(
 					this.d.settings.safetyContext(),
