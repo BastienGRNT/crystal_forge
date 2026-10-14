@@ -33,6 +33,7 @@ import { AuthRepo, DomainRepo, JobRepo, ProjectRepo, ResourceRepo, SettingsRepo 
 import { createFakeApis } from './infrastructure/mock/fake-apis';
 import { seedMockDatabase } from './infrastructure/mock/seed';
 import { resetWorld } from './infrastructure/mock/world';
+import { exportPublicKey, importProvisioning } from './application/provisioning';
 
 export interface Forge extends ForgeServices {
 	engine: JobEngine;
@@ -173,6 +174,25 @@ function build(): Forge {
 			const kp = generateForgeKeyPair('forge-demo');
 			settings.set({ 'ssh.privateKey': kp.privateKey, 'ssh.publicKey': kp.publicKey, 'letsencrypt.email': 'bastien@bastiengrnt.fr' });
 		}
+	}
+
+	if (config.mode === 'live') {
+		// Clé SSH générée au premier démarrage : bootstrap.sh la lit (updates/forge.pub) pour le template 900.
+		if (!settings.has('ssh.privateKey')) {
+			const kp = generateForgeKeyPair('forge');
+			settings.set({ 'ssh.privateKey': kp.privateKey, 'ssh.publicKey': kp.publicKey });
+			console.log('[forge] Clé SSH générée (Réglages → Clé SSH).');
+		}
+		const publish = () => void exportPublicKey(config.updatesDir, settings.get('ssh.publicKey')).catch((err) => console.warn(`[forge] forge.pub : ${err}`));
+		publish();
+		settings.onChange(publish);
+		// Réglages Proxmox déposés par infra/02 (provision.json) : importés puis supprimés.
+		const provision = () =>
+			void importProvisioning(config.updatesDir, settings)
+				.then((keys) => keys?.length && console.log(`[forge] Réglages importés depuis infra/02 : ${keys.join(', ')}`))
+				.catch((err) => console.warn(`[forge] ${err instanceof Error ? err.message : err}`));
+		provision();
+		setInterval(provision, 10_000).unref();
 	}
 
 	const engine = new JobEngine(services);

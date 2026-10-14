@@ -126,7 +126,7 @@ export class ServerHealthService {
 					const bridge = settings.get('proxmox.bridge');
 					const ifaces = await proxmox.api.nodeNetworks();
 					const b = ifaces.find((i) => i.iface === bridge);
-					if (!b) return { id: 'bridge', group: 'Réseau', label: `Bridge « ${bridge} »`, status: 'error', detail: 'Absent de la configuration réseau du nœud.', fix: 'Ajoutez le bridge dans /etc/network/interfaces (voir docs/INSTALL.md).' };
+					if (!b) return { id: 'bridge', group: 'Réseau', label: `Bridge « ${bridge} »`, status: 'error', detail: 'Absent de la configuration réseau du nœud.', fix: 'bash infra/00a-network.sh (bridge nat, NAT sortant, 80/443 → NPM).' };
 					const gw = settings.get('network.gateway');
 					const ok = b.active !== 0 && (!b.cidr || b.cidr.startsWith(`${gw}/`) || b.address === gw);
 					return {

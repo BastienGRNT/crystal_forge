@@ -39,6 +39,10 @@
 #         FORGE_SECRET_FILE=/root/forge-token.txt bash infra/02-proxmox-forge-access.sh
 #   Avec FORGE_SECRET_FILE, le secret est écrit dans ce fichier (mode 600) au lieu
 #   d'être affiché dans le terminal (historique, enregistrement de session…).
+#         FORGE_DELIVER_CT=150 bash infra/02-proxmox-forge-access.sh   (utilisé par bootstrap.sh)
+#   Avec FORGE_DELIVER_CT, l'URL, le nœud, le jeton et le CA sont remis directement
+#   à Forge (fichier provision.json du CT 150, lu sur l'entrée standard de pct exec,
+#   jamais en argument) : Forge les importe, chiffrés, puis supprime le fichier.
 # Idempotent. Le secret du jeton n'est affiché qu'à sa création (Proxmox ne le
 # stocke qu'en hash) : si le jeton existe déjà, le script propose de le régénérer.
 # =============================================================================
@@ -49,6 +53,7 @@ TOKEN_NAME="forge"
 TOKEN_ID="$PVE_USER!$TOKEN_NAME"
 SDN_PATH="/sdn/zones/localnetwork/$FORGE_BRIDGE"
 SECRET_FILE="${FORGE_SECRET_FILE:-}"
+DELIVER_CT="${FORGE_DELIVER_CT:-}"
 
 ACLS=(
 	"/|PVEAuditor"
@@ -175,11 +180,28 @@ else
 fi
 if check_priv "/storage/$FORGE_STORAGE" Datastore.AllocateSpace; then ok "Stockage $FORGE_STORAGE : Datastore.AllocateSpace présent"; fi
 
+# Remise directe à Forge (CT 150) : aucun copier-coller, le secret n'est pas affiché.
+delivered=0
+if [[ -n "$token_secret" && -n "$DELIVER_CT" ]]; then
+	if pct exec "$DELIVER_CT" -- test -d /opt/forge/updates 2>/dev/null; then
+		printf '  %s$ pct exec %s -- … > /opt/forge/updates/provision.json (jeton + CA, via stdin)%s\n' "$C_DIM" "$DELIVER_CT" "$C_RESET"
+		perl -MJSON::PP -e 'local $/; my $ca = do { open my $f, "<", "/etc/pve/pve-root-ca.pem" or die; <$f> }; my %h = ("proxmox.url" => $ARGV[0], "proxmox.node" => $ARGV[1], "proxmox.tokenId" => $ARGV[2], "proxmox.tokenSecret" => <STDIN>, "proxmox.caCert" => $ca); $h{"proxmox.tokenSecret"} =~ s/\s+\z//; print encode_json(\%h)' \
+			"https://$FORGE_GATEWAY:8006" "$FORGE_NODE" "$TOKEN_ID" <<<"$token_secret" \
+			| pct exec "$DELIVER_CT" -- bash -c 'umask 077 && cat >/opt/forge/updates/provision.json.part && chown 1000:1000 /opt/forge/updates/provision.json.part && mv /opt/forge/updates/provision.json.part /opt/forge/updates/provision.json'
+		delivered=1
+		ok "Jeton et CA remis à Forge (CT $DELIVER_CT) : importés automatiquement sous 10 s, puis le fichier est supprimé."
+	else
+		warn "Forge n'est pas encore déployé sur le CT $DELIVER_CT (/opt/forge/updates absent) : secret affiché ci-dessous."
+	fi
+fi
+
 title "À coller dans Forge → Réglages → Proxmox"
 echo "  URL            : https://$FORGE_GATEWAY:8006"
 echo "  Nœud           : $FORGE_NODE"
 echo "  ID du jeton    : $TOKEN_ID"
-if [[ -n "$token_secret" && -n "$SECRET_FILE" ]]; then
+if [[ $delivered -eq 1 ]]; then
+	echo "  Secret         : remis directement à Forge (non affiché)"
+elif [[ -n "$token_secret" && -n "$SECRET_FILE" ]]; then
 	(umask 077 && printf '%s\n' "$token_secret" >"$SECRET_FILE")
 	chmod 600 "$SECRET_FILE"
 	echo "  Secret         : écrit dans $SECRET_FILE (mode 600, non affiché)"
@@ -191,6 +213,8 @@ elif [[ -n "$token_secret" ]]; then
 else
 	echo "  Secret         : (inchangé — relancez le script et régénérez le jeton si vous l’avez perdu)"
 fi
-echo
-echo "  Certificat CA de Proxmox (pour vérifier le TLS au lieu de l’ignorer) :"
-sed 's/^/    /' /etc/pve/pve-root-ca.pem
+if [[ $delivered -eq 0 ]]; then
+	echo
+	echo "  Certificat CA de Proxmox (pour vérifier le TLS au lieu de l’ignorer) :"
+	sed 's/^/    /' /etc/pve/pve-root-ca.pem
+fi

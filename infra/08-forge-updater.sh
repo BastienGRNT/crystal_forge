@@ -19,6 +19,10 @@
 #
 # Option --from <dossier> : déploie aussi une copie locale du dépôt (sans git ni
 # rsync), par le même service — utile pour la première installation du bouton.
+# Premier déploiement (pas de /opt/forge/.env) : le .env est créé depuis
+# .env.example avec une FORGE_MASTER_KEY neuve, écrite aussi dans
+# /root/forge-master-key.txt (mode 600) : à ranger dans un gestionnaire de mots
+# de passe, puis shred -u. Si ce fichier existe déjà, sa clé est réutilisée.
 #
 # Usage : bash infra/08-forge-updater.sh [--from /root/crystal_forge]
 # Idempotent.
@@ -28,6 +32,7 @@ source "$(dirname "$0")/lib.sh"
 CT_ID=150
 APP=/opt/forge
 FROM=""
+MASTER_KEY_FILE=/root/forge-master-key.txt
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -44,9 +49,14 @@ title "Vérifications"
 ct_exists "$CT_ID" || die "Le CT $CT_ID n’existe pas : lancez d’abord infra/04-forge-ct.sh."
 [[ "$(pct config "$CT_ID" | awk -F': ' '/^hostname/{print $2}')" == forge ]] || die "Le CT $CT_ID ne s’appelle pas « forge ». Abandon."
 [[ "$(pct status "$CT_ID")" == "status: running" ]] || die "Le CT $CT_ID est arrêté : pct start $CT_ID"
-pct exec "$CT_ID" -- test -f "$APP/.env" || die "$APP/.env absent dans le CT $CT_ID : déployez Forge une première fois (docs/INSTALL.md §5)."
+need_env=0
+if ! pct exec "$CT_ID" -- test -f "$APP/.env"; then
+	[[ -n "$FROM" ]] || die "$APP/.env absent dans le CT $CT_ID : relancez avec --from /root/crystal_forge pour le premier déploiement."
+	need_env=1
+fi
 pct exec "$CT_ID" -- bash -c 'command -v jq && command -v curl && command -v docker' >/dev/null || die "jq, curl ou docker manquant dans le CT $CT_ID (infra/provision/install-docker.sh)."
-ok "CT $CT_ID prêt ($APP/.env présent, docker, jq, curl)."
+ok "CT $CT_ID prêt (docker, jq, curl)."
+[[ $need_env -eq 1 ]] && warn "Premier déploiement : $APP/.env sera créé (DRY_RUN=true, FORGE_MODE=live)."
 if [[ -n "$FROM" ]]; then
 	[[ -f "$FROM/Dockerfile" && -f "$FROM/docker-compose.yml" ]] || die "$FROM ne ressemble pas au dépôt crystal_forge (Dockerfile / docker-compose.yml absents)."
 	ok "Source locale : $FROM"
@@ -58,6 +68,7 @@ need_mem=0
 info "Mémoire du CT $CT_ID : ${mem:-?} Mo"
 
 title "Ce que le script va faire"
+[[ $need_env -eq 1 ]] && plan "Créer $APP/.env depuis .env.example, FORGE_MASTER_KEY $([[ -f $MASTER_KEY_FILE ]] && echo "reprise de $MASTER_KEY_FILE" || echo "neuve, copiée dans $MASTER_KEY_FILE (600)")"
 [[ $need_mem -eq 1 ]] && plan "pct set $CT_ID --memory 2048 (limite, nécessaire au build ; actuellement ${mem} Mo)"
 plan "Installer /usr/local/sbin/forge-update, forge-update.path et forge-update.service dans le CT $CT_ID"
 plan "Créer $APP/updates (propriétaire 1000:1000, mode 750)"
@@ -67,6 +78,21 @@ confirm "Appliquer ?"
 if [[ $need_mem -eq 1 ]]; then
 	run pct set "$CT_ID" --memory 2048
 	info "Retour arrière : pct set $CT_ID --memory $mem (le bouton « Mettre à jour » échouera alors faute de mémoire)."
+fi
+
+if [[ $need_env -eq 1 ]]; then
+	title "Fichier .env"
+	if [[ ! -f "$MASTER_KEY_FILE" ]]; then
+		(umask 077 && openssl rand -base64 32 >"$MASTER_KEY_FILE")
+	fi
+	master_key="$(tr -d '\n' <"$MASTER_KEY_FILE")"
+	[[ "$(printf '%s' "$master_key" | base64 -d 2>/dev/null | wc -c)" -eq 32 ]] || die "$MASTER_KEY_FILE ne contient pas une clé base64 de 32 octets."
+	# La clé passe par l'entrée standard, jamais en argument (visible dans ps).
+	FORGE_KEY="$master_key" awk '/^FORGE_MASTER_KEY=/ { print "FORGE_MASTER_KEY=" ENVIRON["FORGE_KEY"]; next } { print }' "$FROM/.env.example" \
+		| pct exec "$CT_ID" -- bash -c "install -d -m 750 $APP && umask 077 && cat >$APP/.env"
+	unset master_key
+	ok "$APP/.env créé (mode 600)."
+	warn "Rangez $MASTER_KEY_FILE dans votre gestionnaire de mots de passe, puis : shred -u $MASTER_KEY_FILE"
 fi
 
 title "Service de mise à jour"

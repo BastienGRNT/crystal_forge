@@ -117,4 +117,67 @@ ct_run_script() {
 	pct exec "$id" -- env DEBIAN_FRONTEND=noninteractive "$@" bash -s <"$script"
 }
 
+# --- /etc/network/interfaces ------------------------------------------------------
+# Aucune fonction ici ne lance ifreload : seules les lignes sont ajoutées et validées.
+IFACES_FILE="${IFACES_FILE:-/etc/network/interfaces}"
+
+# Partie « commande » d'une ligne d'option (sans le mot-clé post-up, address…), telle
+# qu'on la retrouve dans la sortie d'ifquery (qui normalise les espaces après le mot-clé).
+iface_line_cmd() { sed -E 's/^[[:space:]]*[a-z0-9-]+[[:space:]]+//' <<<"$1"; }
+
+# Vérifie avec ifquery que chaque ligne apparaît dans la config analysée de l'interface.
+ifaces_validate() {
+	local iface="$1" parsed line
+	shift
+	parsed="$(ifquery "$iface" 2>&1)" || { printf '%s' "$parsed"; return 1; }
+	for line in "$@"; do
+		grep -qF -- "$(iface_line_cmd "$line")" <<<"$parsed" || { printf 'ligne absente : %s\n%s' "$line" "$parsed"; return 1; }
+	done
+	printf '%s' "$parsed"
+}
+
+# Restaure la copie et arrête le script.
+ifaces_restore_die() {
+	cp -a "$1" "$IFACES_FILE"
+	die "$2 — $IFACES_FILE restauré depuis $1."
+}
+
+# Ajoute des lignes à la fin du bloc « iface <nom> » (après sa dernière ligne non vide),
+# après une copie de sauvegarde ; valide avec ifquery, restaure la copie en cas d'échec.
+#   ifaces_add_to_block <iface> <copie> <ligne>...
+ifaces_add_to_block() {
+	local iface="$1" backup="$2" tmp parsed
+	shift 2
+	run cp -a "$IFACES_FILE" "$backup"
+	tmp="$(mktemp "$IFACES_FILE.forge-XXXXXX")"
+	# Lignes passées par l'environnement (ENVIRON gère les sauts de ligne, avec mawk comme gawk).
+	FORGE_ADD_LINES="$(printf '%s\n' "$@")" awk -v iface="$iface" '
+		function flush() { if (inblock) { print ENVIRON["FORGE_ADD_LINES"]; inblock = 0; done = 1 } for (i = 1; i <= nblank; i++) print ""; nblank = 0 }
+		/^(auto|iface|source|source-directory|allow-[a-z]+|mapping|rename)([[:space:]]|$)/ { flush() }
+		/^[[:space:]]*$/ { if (inblock) { nblank++; next } }
+		{ for (i = 1; i <= nblank; i++) print ""; nblank = 0 }
+		$1 == "iface" && $2 == iface && !done { inblock = 1 }
+		{ print }
+		END { flush() }
+	' "$IFACES_FILE" >"$tmp"
+	chmod --reference="$IFACES_FILE" "$tmp"
+	mv "$tmp" "$IFACES_FILE"
+	parsed="$(ifaces_validate "$iface" "$@")" || ifaces_restore_die "$backup" "Validation par ifquery $iface impossible : $parsed"
+	ok "$IFACES_FILE mis à jour et validé (ifquery $iface)."
+}
+
+# Ajoute un bloc complet (nouvelle interface) en fin de fichier, avec copie et validation.
+#   ifaces_append_block <iface> <copie> <ligne>...   (lignes : auto…, iface…, options)
+ifaces_append_block() {
+	local iface="$1" backup="$2" parsed
+	shift 2
+	run cp -a "$IFACES_FILE" "$backup"
+	printf '\n%s\n' "$(printf '%s\n' "$@")" >>"$IFACES_FILE"
+	# Seules les options (lignes indentées) sont recherchées dans la sortie d'ifquery.
+	local opts=() l
+	for l in "$@"; do [[ "$l" == [[:space:]]* ]] && opts+=("$l"); done
+	parsed="$(ifaces_validate "$iface" "${opts[@]}")" || ifaces_restore_die "$backup" "Validation par ifquery $iface impossible : $parsed"
+	ok "Bloc « $iface » ajouté à $IFACES_FILE et validé."
+}
+
 INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

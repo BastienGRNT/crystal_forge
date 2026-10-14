@@ -27,7 +27,6 @@
 # =============================================================================
 source "$(dirname "$0")/lib.sh"
 
-IFACES_FILE="/etc/network/interfaces"
 RULE=(-i 'fwbr+' -j CT --zone 1)
 RULE_TEXT="iptables -t raw -I PREROUTING -i fwbr+ -j CT --zone 1"
 POST_UP="	post-up   iptables -t raw -I PREROUTING -i fwbr+ -j CT --zone 1"
@@ -74,31 +73,8 @@ if [[ $rule_live -eq 0 ]]; then
 fi
 
 if [[ $rule_file -eq 0 ]]; then
-	run cp -a "$IFACES_FILE" "$BACKUP"
-	tmp="$(mktemp "$IFACES_FILE.forge-XXXXXX")"
-	# Insère les deux lignes après la dernière ligne non vide du bloc « iface nat »
-	# (le bloc s'arrête à la prochaine strophe : auto, iface, source, allow-…).
-	awk -v bridge="$FORGE_BRIDGE" -v up="$POST_UP" -v down="$POST_DOWN" '
-		function flush() { if (inblock) { print up; print down; inblock = 0; done = 1 } for (i = 1; i <= nblank; i++) print ""; nblank = 0 }
-		/^(auto|iface|source|source-directory|allow-[a-z]+|mapping|rename)([[:space:]]|$)/ { flush() }
-		/^[[:space:]]*$/ { if (inblock) { nblank++; next } }
-		{ for (i = 1; i <= nblank; i++) print ""; nblank = 0 }
-		$1 == "iface" && $2 == bridge && !done { inblock = 1 }
-		{ print }
-		END { flush() }
-	' "$IFACES_FILE" >"$tmp"
-	chmod --reference="$IFACES_FILE" "$tmp"
-	mv "$tmp" "$IFACES_FILE"
-
-	restore() {
-		cp -a "$BACKUP" "$IFACES_FILE"
-		die "$1 Fichier restauré depuis $BACKUP. La règle immédiate reste active (retrait : iptables -t raw -D PREROUTING -i fwbr+ -j CT --zone 1)."
-	}
-	parsed="$(ifquery "$FORGE_BRIDGE" 2>&1)" || restore "ifquery $FORGE_BRIDGE a échoué : $parsed"
-	grep -qF -- "-i fwbr+ -j CT --zone 1" <<<"$parsed" || restore "ifquery $FORGE_BRIDGE ne montre pas la règle :
-$parsed"
-	ok "$IFACES_FILE mis à jour et validé :"
-	sed 's/^/    /' <<<"$parsed"
+	ifaces_add_to_block "$FORGE_BRIDGE" "$BACKUP" "$POST_UP" "$POST_DOWN"
+	sed 's/^/    /' <<<"$(ifquery "$FORGE_BRIDGE")"
 fi
 
 title "Terminé"
