@@ -13,7 +13,7 @@
 #
 # Usage :
 #   bash infra/bootstrap.sh                       # 1er passage (01, 02, 04)
-#   bash infra/bootstrap.sh "ssh-ed25519 AAAA…"   # après avoir généré la clé dans Forge (03, 05)
+#   bash infra/bootstrap.sh "ssh-ed25519 AAAA…"   # après avoir généré la clé dans Forge (03, 05, 07)
 # =============================================================================
 source "$(dirname "$0")/lib.sh"
 
