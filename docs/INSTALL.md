@@ -1,24 +1,110 @@
 # Installer Forge
 
-**En une commande** : `bash infra/bootstrap.sh` enchaîne les scripts ci-dessous dans l'ordre et saute ce qui est déjà fait. Un premier passage installe 01, 02 et 04. Relancez-le ensuite avec la clé publique de Forge : `bash infra/bootstrap.sh "ssh-ed25519 AAAA… forge"` installe 03, 05 et 07.
+## En une commande
 
-Ordre détaillé (chaque étape est réversible, aucune ne touche aux CT existants) :
+Copiez **tout le dépôt** sur l'hôte Proxmox, puis lancez bootstrap en root :
 
-1. `infra/01-backup-job.sh` : sauvegardes quotidiennes de la prod (à faire en premier).
-2. `infra/02-proxmox-forge-access.sh` : pool `forge`, utilisateur `forge@pve`, jeton API.
-3. `infra/04-forge-ct.sh` : CT 150 qui hébergera Forge.
-4. Déployer Forge sur le CT 150 (section 5), créer le compte admin, **générer la clé SSH** dans Réglages.
-5. `infra/03-template-docker-runner.sh "<clé publique>"` : template 900.
-6. Créer le jeton GitHub, les clés OVH et le compte NPM (sections 2 à 4), les saisir dans Réglages.
-7. `infra/05-firewall.sh` : active le pare-feu Proxmox du datacenter, sans filtrer l'hôte, pour que l'isolement par CT s'applique. Puis `infra/07-conntrack-zone.sh` : sans lui, les CT avec pare-feu n'ont plus Internet.
-8. **Réglages → Tester les connexions** : tout doit être vert, et la matrice doit montrer que les CT de prod sont en lecture seule. Ensuite, **Santé du serveur** doit être au vert.
-9. Faire un premier déploiement **en DRY-RUN** (par défaut), lire le journal, puis passer `DRY_RUN=false`.
-10. `infra/08-forge-updater.sh` : active le bouton **Réglages → Mise à jour** (section 5).
+```bash
+scp -r crystal_forge root@<hôte>:/root/
+ssh root@<hôte>
+bash /root/crystal_forge/infra/bootstrap.sh
+```
+
+`bootstrap.sh` enchaîne tous les scripts. Chacun **vérifie l'état réel** et ne fait que ce qui manque (sinon « rien à faire »), affiche son plan et demande `oui`. Il peut donc être relancé à tout moment, sur un serveur neuf comme sur un serveur déjà en production.
+
+| Ordre | Script | Ce qu'il fait |
+|---|---|---|
+| 1 | (bootstrap) | télécharge le template Ubuntu 24.04 s'il manque |
+| 2 | `00a-network.sh` | bridge `nat` 10.10.10.1/24, routage IPv4, MASQUERADE, redirection 80/443 → NPM, zone conntrack (§0.1) |
+| 3 | `00b-tailscale.sh` | Tailscale sur l'hôte, route 10.10.10.0/24 (§0.2) |
+| 4 | `00c-npm-ct.sh` | CT 100 Nginx Proxy Manager à 10.10.10.2 (§0.3) |
+| 5 | `01-backup-job.sh` | sauvegardes quotidiennes des CT de prod |
+| 6 | `04-forge-ct.sh` | CT 150 qui héberge Forge |
+| 7 | `08-forge-updater.sh --from` | déploie Forge (crée le `.env` et la clé maître au premier passage) et active le bouton de mise à jour |
+| 8 | `02-proxmox-forge-access.sh` | pool, utilisateur et jeton API, **remis directement à Forge** (aucun copier-coller) |
+| 9 | `03-template-docker-runner.sh` | template 900, avec la clé SSH que Forge a générée à son premier démarrage |
+| 10 | `05-firewall.sh` | pare-feu du datacenter, sans filtrer l'hôte |
+| 11 | `07-conntrack-zone.sh` | NAT des CT avec pare-feu (déjà fait par 00a sur un serveur neuf) |
+
+**Ce qui reste à faire à la main**, parce que cela demande vos comptes ou un navigateur (bootstrap le rappelle à la fin) :
+
+1. **Tailscale** : ouvrir le lien de connexion affiché par 00b, puis approuver la route 10.10.10.0/24 dans la console (Machines → l'hôte → *Edit route settings*).
+2. **NPM** (`http://10.10.10.2:81`, via Tailscale) : créer le compte administrateur, puis le compte « Forge » non admin (§4).
+3. **Forge** (`http://10.10.10.15:3000/setup`) : créer le compte admin avec le jeton d'installation, affiché par bootstrap.
+4. **Forge → Réglages** : jeton GitHub (§2), clés OVH (§3), compte NPM Forge (§4). Proxmox et la clé SSH sont déjà configurés.
+5. **Réglages → Tester les connexions**, puis **Santé du serveur** : tout doit être vert, et la matrice doit montrer que les CT de prod sont en lecture seule.
+6. Premier déploiement **en DRY-RUN** (par défaut), lecture du journal, puis `DRY_RUN=false` (§6).
+
+**À sauvegarder** : `/root/forge-master-key.txt`, la clé maître créée par 08 au premier déploiement. Rangez-la dans votre gestionnaire de mots de passe, puis `shred -u /root/forge-master-key.txt`. Sans elle, les jetons et les `.env` stockés dans Forge sont illisibles.
+
+Ce qui est toujours automatique, une fois installé : pour chaque projet, Forge crée le CT, ses règles de pare-feu, l'enregistrement DNS OVH et le proxy host NPM avec son certificat Let's Encrypt, et les supprime avec le projet. Il n'y a aucune règle réseau ni aucun proxy host à gérer à la main.
 
 En cas de problème, voir la section **Dépannage** à la fin.
 
-> Tous les scripts `infra/` affichent ce qu'ils vont faire et demandent de taper `oui`.
-> Copiez le dossier `infra/` sur l'hôte (`scp -r infra root@100.77.79.45:/root/forge-infra`) et lancez-les en root.
+---
+
+## 0. Socle réseau
+
+### 0.1 Réseau interne — `00a-network.sh`
+
+```bash
+bash infra/00a-network.sh
+```
+
+Les CT vivent sur un bridge privé `nat` (10.10.10.0/24). L'hôte en est la passerelle (10.10.10.1) et fait le NAT vers Internet. Les ports 80/443 de l'IP publique sont redirigés vers NPM. Le script détecte l'interface publique (celle de la route par défaut, en général `vmbr0`) et vérifie chaque élément séparément :
+
+- le routage IPv4 (`net.ipv4.ip_forward=1`, rendu persistant dans `/etc/sysctl.d/99-forge-ip-forward.conf`) ;
+- le bridge `nat` ;
+- le MASQUERADE de 10.10.10.0/24 ;
+- le DNAT 80/443 → 10.10.10.2, reconnu quelle que soit sa forme (`--dport`, `--dports`, `-d <IP>`…) ;
+- la zone conntrack des ponts `fwbr` (§1.6).
+
+**Serveur neuf** : le script ajoute le bloc suivant à `/etc/network/interfaces` (après une copie de sauvegarde), le valide avec `ifquery nat`, puis monte **uniquement** cette interface (`ifup nat`). `vmbr0` et le reste du réseau ne sont pas touchés.
+
+```
+auto nat
+iface nat inet static
+	address 10.10.10.1/24
+	bridge-ports none
+	bridge-stp off
+	bridge-fd 0
+	post-up   iptables -t nat -A POSTROUTING -s '10.10.10.0/24' -o vmbr0 -j MASQUERADE
+	post-down iptables -t nat -D POSTROUTING -s '10.10.10.0/24' -o vmbr0 -j MASQUERADE
+	post-up   iptables -t nat -A PREROUTING -i vmbr0 -p tcp -m multiport --dports 80,443 -j DNAT --to-destination 10.10.10.2
+	post-down iptables -t nat -D PREROUTING -i vmbr0 -p tcp -m multiport --dports 80,443 -j DNAT --to-destination 10.10.10.2
+	post-up   iptables -t raw -I PREROUTING -i fwbr+ -j CT --zone 1
+	post-down iptables -t raw -D PREROUTING -i fwbr+ -j CT --zone 1
+```
+
+**Bridge déjà en place** : seules les règles manquantes sont ajoutées, tout de suite et dans le bloc existant. Rien de ce qui existe n'est modifié, et le script ne lance **jamais** `ifreload`. En cas d'échec de la validation, la copie est restaurée automatiquement.
+
+### 0.2 Tailscale — `00b-tailscale.sh`
+
+```bash
+bash infra/00b-tailscale.sh
+TS_AUTHKEY_FILE=/root/ts.key bash infra/00b-tailscale.sh   # avec une clé d'authentification
+```
+
+Forge, NPM (:81) et les CT ne sont exposés à aucun port public : on y accède **uniquement via Tailscale**. Le script :
+
+- installe Tailscale depuis son dépôt apt officiel ;
+- connecte l'hôte en annonçant la route 10.10.10.0/24 ;
+- si l'hôte est déjà connecté, ajoute seulement la route (`tailscale set`), sans toucher aux autres réglages.
+
+Sur un nœud neuf, il passe `--accept-dns=false` : sinon l'hôte, et donc les CT qui héritent de son `resolv.conf`, utiliseraient MagicDNS (100.100.100.100).
+
+Le routeur de sous-réseau fait du SNAT : vos requêtes arrivent sur les CT avec l'adresse source 10.10.10.1, d'où les règles d'accès de Forge et du CT 150. **Il reste à approuver la route** dans la console Tailscale, sauf si vos ACL prévoient un `autoApprovers` pour 10.10.10.0/24.
+
+### 0.3 Nginx Proxy Manager — `00c-npm-ct.sh`
+
+```bash
+bash infra/00c-npm-ct.sh
+NPM_IMAGE=jc21/nginx-proxy-manager:<version> bash infra/00c-npm-ct.sh   # version figée
+```
+
+Le script crée le CT 100 `npm` : 10.10.10.2, 1 cœur, 1 Go, 8 Go, Docker, NPM dans `/opt/npm` avec ses données dans `/opt/npm/data` et `/opt/npm/letsencrypt`. Seuls les ports 80/443 sont redirigés depuis Internet ; l'administration (:81) n'est joignable que via Tailscale. Le CT est hors du pool `forge` et fait partie des CT protégés : Forge ne peut ni le modifier ni le supprimer, et 01 le sauvegarde.
+
+Si NPM répond déjà sur `10.10.10.2:81`, le script ne fait rien. Il ne modifie jamais un CT existant.
 
 ---
 
@@ -77,7 +163,9 @@ Ces privilèges ont été vérifiés dans le source de `pve-container` (PVE 9) :
 
 À la fin, le script vérifie que le jeton n'a, sur 100, 101 et 401-404, **aucun privilège autre que `*.Audit`** : tous les privilèges sont contrôlés, pas seulement quelques-uns, et une lecture impossible arrête le script. Il vérifie aussi `Pool.Audit` sur le pool. Il affiche ensuite le secret du jeton (une seule fois) et le certificat CA de Proxmox, à coller dans Réglages → Proxmox.
 
-Pour ne pas afficher le secret dans le terminal (historique, enregistrement de session), écrivez-le dans un fichier en mode 600, puis supprimez ce fichier après l'avoir collé :
+Lancé par bootstrap (`FORGE_DELIVER_CT=150`), le script **remet le jeton et le CA directement à Forge**, sans les afficher. Il écrit `provision.json` dans le CT 150 en passant par l'entrée standard de `pct exec`, jamais en argument. Forge importe ces réglages chiffrés dans les 10 s, puis supprime le fichier. Seules les clés `proxmox.*` sont acceptées.
+
+Lancé à la main, pour ne pas afficher le secret dans le terminal (historique, enregistrement de session), écrivez-le dans un fichier en mode 600, puis supprimez ce fichier après l'avoir collé :
 
 ```bash
 FORGE_SECRET_FILE=/root/forge-token.txt bash infra/02-proxmox-forge-access.sh
@@ -238,6 +326,8 @@ Reportez l'email et le mot de passe dans Réglages → NPM.
 Le test de connexion **signale un compte administrateur**. N'en utilisez pas : une fois `DRY_RUN=false`, un compte admin peut modifier ou supprimer **tous** les proxy hosts, y compris ceux de la prod, et changer les utilisateurs ou les réglages de NPM. Forge s'interdit de toucher à ce qu'il n'a pas créé, mais c'est le compte non admin qui borne réellement ce qu'une erreur ou un jeton volé peut faire.
 
 ## 5. Déployer Forge sur le CT 150
+
+**Automatique avec bootstrap** : `08-forge-updater.sh --from <dépôt>` crée `/opt/forge/.env` depuis `.env.example`, avec une `FORGE_MASTER_KEY` neuve (copiée dans `/root/forge-master-key.txt`, mode 600). Il déploie ensuite Forge par le service de mise à jour. Au premier démarrage, Forge génère sa clé SSH ; 02 lui remet le jeton Proxmox et le CA. Les méthodes manuelles ci-dessous restent possibles.
 
 Depuis votre PC, via Tailscale :
 
