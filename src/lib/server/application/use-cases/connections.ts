@@ -34,6 +34,41 @@ export interface PermissionRow {
 	ok: boolean;
 }
 
+/** Commande qui ajoute Pool.Audit au jeton (rôle PVEPoolUser sur le pool). */
+export function poolAuditFix(pool: string, tokenId: string): string {
+	const user = tokenId.split('!')[0] ?? tokenId;
+	return `pveum acl modify /pool/${pool} --roles PVEPoolUser --users ${user} --tokens '${tokenId}' --propagate 1`;
+}
+
+/**
+ * Diagnostic du template. Une ACL sur /pool/<pool> remplace les rôles hérités de « / » :
+ * sans Pool.Audit, Proxmox retire le champ « pool » de /cluster/resources, et le
+ * template (comme chaque CT du pool) paraît hors du pool.
+ */
+export function templateCheck(input: {
+	templateId: number;
+	pool: string;
+	tokenId: string;
+	tpl: { name: string; template: boolean; pool: string | null } | undefined;
+	poolAudit: boolean;
+	/** Membres lus par GET /pools/<pool> (null si illisible). */
+	poolMembers: number[] | null;
+}): CheckItem {
+	const { templateId, pool, tpl } = input;
+	const label = `Template ${templateId}`;
+	if (!tpl) return { label, status: 'error', detail: 'Introuvable : lancez infra/03-template-docker-runner.sh' };
+	if (!tpl.template) return { label, status: 'error', detail: `Le CT ${templateId} existe mais n'est pas un template` };
+	if (tpl.pool === pool) return { label, status: 'ok', detail: `${tpl.name}, dans le pool « ${pool} »` };
+	if (tpl.pool === null && (!input.poolAudit || input.poolMembers?.includes(templateId))) {
+		return {
+			label,
+			status: 'error',
+			detail: `Proxmox masque le pool des CT : le jeton n'a pas Pool.Audit sur /pool/${pool}, et le garde refusera toute action. Sur l'hôte : ${poolAuditFix(pool, input.tokenId)}`
+		};
+	}
+	return { label, status: 'error', detail: `Hors du pool « ${pool} » : Forge ne pourra pas le cloner` };
+}
+
 const WRITE_PRIVS = ['VM.Allocate', 'VM.PowerMgmt', 'VM.Config.Options', 'VM.Config.Disk', 'VM.Config.Network', 'VM.Config.CPU', 'VM.Config.Memory', 'VM.Backup', 'VM.Clone', 'VM.Snapshot'];
 
 function worst(items: CheckItem[]): CheckStatus {
@@ -96,18 +131,13 @@ export class ConnectionTester {
 		const pool = settings.get('proxmox.pool');
 		const templateId = settings.int('proxmox.templateId');
 		const tpl = guests.find((g) => g.vmid === templateId);
-		items.push(
-			!tpl
-				? { label: `Template ${templateId}`, status: 'error', detail: 'Introuvable : lancez infra/03-template-docker-runner.sh' }
-				: !tpl.template
-					? { label: `Template ${templateId}`, status: 'error', detail: `Le CT ${templateId} existe mais n'est pas un template` }
-					: tpl.pool !== pool
-						? { label: `Template ${templateId}`, status: 'error', detail: `Hors du pool « ${pool} » : Forge ne pourra pas le cloner` }
-						: { label: `Template ${templateId}`, status: 'ok', detail: `${tpl.name}, dans le pool « ${pool} »` }
-		);
-
 		const all = await proxmox.permissions();
 		const has = (path: string, priv: string) => !!all[path]?.[priv];
+		const poolPerms = all[`/pool/${pool}`] ?? (await proxmox.permissions(`/pool/${pool}`))[`/pool/${pool}`] ?? {};
+		const poolAudit = !!poolPerms['Pool.Audit'];
+		const poolMembers = await proxmox.api.poolMembers(pool).catch(() => null);
+		items.push(templateCheck({ templateId, pool, tokenId: settings.get('proxmox.tokenId'), tpl, poolAudit, poolMembers }));
+
 		const req = async (path: string, privs: string[], label: string) => {
 			const p = all[path] ?? (await proxmox.permissions(path))[path] ?? {};
 			const missing = privs.filter((x) => !p[x]);
@@ -118,6 +148,11 @@ export class ConnectionTester {
 			);
 		};
 		await req(`/pool/${pool}`, ['VM.Allocate', 'VM.Clone', 'VM.Config.Network', 'VM.PowerMgmt'], 'Droits sur le pool');
+		items.push(
+			poolAudit
+				? { label: 'Lecture du pool', status: 'ok', detail: `/pool/${pool} : Pool.Audit` }
+				: { label: 'Lecture du pool', status: 'error', detail: `/pool/${pool} : manque Pool.Audit (rôle PVEPoolUser). Sur l'hôte : ${poolAuditFix(pool, settings.get('proxmox.tokenId'))}` }
+		);
 		await req(`/storage/${settings.get('proxmox.storage')}`, ['Datastore.AllocateSpace'], 'Droits sur le stockage');
 		await req(`/sdn/zones/localnetwork/${settings.get('proxmox.bridge')}`, ['SDN.Use'], 'Droits sur le bridge');
 		const vmbr0 = (await proxmox.permissions('/sdn/zones/localnetwork/vmbr0'))['/sdn/zones/localnetwork/vmbr0'] ?? {};

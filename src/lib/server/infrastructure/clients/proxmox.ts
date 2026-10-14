@@ -156,6 +156,11 @@ export class ProxmoxClient implements ProxmoxApi {
 		return this.#call<PvePermissions>('GET', '/access/permissions', { path });
 	}
 
+	async poolMembers(pool: string): Promise<number[]> {
+		const p = await this.#call<{ members?: { vmid?: number }[] }>('GET', `/pools/${encodeURIComponent(pool)}`);
+		return (p.members ?? []).map((m) => m.vmid).filter((v): v is number => typeof v === 'number');
+	}
+
 	async isIdFree(vmid: number): Promise<boolean> {
 		try {
 			await this.#call('GET', '/cluster/nextid', { vmid });

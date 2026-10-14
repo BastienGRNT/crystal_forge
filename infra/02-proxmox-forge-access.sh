@@ -13,8 +13,14 @@
 #       /                               PVEAuditor         lecture seule de tout (dashboard, IP libres)
 #       /pool/forge                     PVEVMAdmin         gérer UNIQUEMENT les CT du pool (dont cloner le
 #                                                          template 900 : VM.Clone, et créer : VM.Allocate)
+#       /pool/forge                     PVEPoolUser        Pool.Audit : voir à quel pool appartient chaque CT
 #       /storage/local                  PVEDatastoreUser   allouer les disques des clones + vzdump
 #       /sdn/zones/localnetwork/nat     PVESDNUser         utiliser le bridge « nat » (SDN.Use, PVE 8+/9)
+#
+# ⚠ Une ACL posée sur /pool/forge REMPLACE, pour ce chemin, les rôles hérités de
+#   « / » (PVEAuditor) : sans PVEPoolUser, le jeton n'a pas Pool.Audit sur le pool,
+#   et Proxmox retire le champ « pool » de GET /cluster/resources (PVE/API2/Cluster.pm).
+#   Forge croit alors le template et les CT hors du pool, et le garde refuse tout.
 #
 # Privilèges vérifiés dans le source pve-container (PVE 9) :
 #   POST /nodes/{node}/lxc/{vmid}/clone : VM.Clone sur /vms/900 + VM.Allocate sur
@@ -30,6 +36,9 @@
 #   • modifier les permissions, les utilisateurs, le stockage ou l'hôte.
 #
 # Usage : bash infra/02-proxmox-forge-access.sh
+#         FORGE_SECRET_FILE=/root/forge-token.txt bash infra/02-proxmox-forge-access.sh
+#   Avec FORGE_SECRET_FILE, le secret est écrit dans ce fichier (mode 600) au lieu
+#   d'être affiché dans le terminal (historique, enregistrement de session…).
 # Idempotent. Le secret du jeton n'est affiché qu'à sa création (Proxmox ne le
 # stocke qu'en hash) : si le jeton existe déjà, le script propose de le régénérer.
 # =============================================================================
@@ -39,16 +48,24 @@ PVE_USER="forge@pve"
 TOKEN_NAME="forge"
 TOKEN_ID="$PVE_USER!$TOKEN_NAME"
 SDN_PATH="/sdn/zones/localnetwork/$FORGE_BRIDGE"
+SECRET_FILE="${FORGE_SECRET_FILE:-}"
 
 ACLS=(
 	"/|PVEAuditor"
 	"/pool/$FORGE_POOL|PVEVMAdmin"
+	"/pool/$FORGE_POOL|PVEPoolUser"
 	"/storage/$FORGE_STORAGE|PVEDatastoreUser"
 	"$SDN_PATH|PVESDNUser"
 )
 
 require_root
 require_pve
+
+if [[ -n "$SECRET_FILE" ]]; then
+	[[ "$SECRET_FILE" == /* ]] || die "FORGE_SECRET_FILE doit être un chemin absolu."
+	[[ -d "$(dirname "$SECRET_FILE")" ]] || die "Dossier introuvable : $(dirname "$SECRET_FILE")"
+	[[ -e "$SECRET_FILE" ]] && die "$SECRET_FILE existe déjà : supprimez-le (shred -u) ou choisissez un autre chemin."
+fi
 
 json_field() { perl -MJSON::PP -e 'local $/; my $j=decode_json(<STDIN>); my @k=split /\./, $ARGV[0]; for (@k){ $j = ref $j eq "ARRAY" ? $j->[$_] : $j->{$_} } print defined $j ? (ref $j ? encode_json($j) : $j) : ""' "$1"; }
 
@@ -126,16 +143,29 @@ check_priv() {
 	pveum user token permissions "$PVE_USER" "$TOKEN_NAME" --path "$path" --output-format json 2>/dev/null \
 		| perl -MJSON::PP -e 'local $/; my $j=decode_json(<STDIN>); my %p = map { %{$_} } values %$j; exit !exists $p{$ARGV[0]}' "$priv"
 }
+# Privilèges effectifs du jeton sur un chemin, hors *.Audit (lecture seule).
+# Échec de lecture = échec du script : on ne conclut jamais « lecture seule » à l'aveugle.
+non_audit_privs() {
+	pveum user token permissions "$PVE_USER" "$TOKEN_NAME" --path "$1" --output-format json \
+		| perl -MJSON::PP -e 'local $/; my $j=decode_json(<STDIN>); my %p = map { %{$_} } values %$j; print join(" ", sort grep { !/\.Audit$/ } keys %p)'
+}
 for id in "${PROD_CTIDS[@]}"; do
-	if check_priv "/vms/$id" VM.Allocate || check_priv "/vms/$id" VM.PowerMgmt || check_priv "/vms/$id" VM.Config.Options; then
-		die "Le jeton a un droit d’écriture sur le CT $id ! Vérifiez les ACL (pveum acl list). NE PAS utiliser ce jeton."
+	privs="$(non_audit_privs "/vms/$id")" || die "Impossible de lire les droits du jeton sur /vms/$id. NE PAS utiliser ce jeton avant d’avoir vérifié."
+	if [[ -n "$privs" ]]; then
+		die "Le jeton a des droits au-delà de la lecture sur le CT $id : $privs ! Vérifiez les ACL (pveum acl list). NE PAS utiliser ce jeton."
 	fi
-	ok "CT $id : lecture seule (ni VM.Allocate, ni VM.PowerMgmt, ni VM.Config.*)"
+	ok "CT $id : lecture seule (uniquement des privilèges *.Audit)"
 done
 if check_priv "/pool/$FORGE_POOL" VM.Allocate && check_priv "/pool/$FORGE_POOL" VM.Clone; then
 	ok "Pool $FORGE_POOL : VM.Allocate + VM.Clone présents"
 else
 	warn "Le jeton n’a pas VM.Allocate/VM.Clone sur /pool/$FORGE_POOL — vérifiez."
+fi
+if check_priv "/pool/$FORGE_POOL" Pool.Audit; then
+	ok "Pool $FORGE_POOL : Pool.Audit présent (Proxmox renvoie le champ « pool » des CT)"
+else
+	warn "Pool.Audit manquant sur /pool/$FORGE_POOL : Forge verra le template et les CT hors du pool."
+	plan "pveum acl modify /pool/$FORGE_POOL --roles PVEPoolUser --users $PVE_USER --tokens '$TOKEN_ID' --propagate 1"
 fi
 if check_priv "$SDN_PATH" SDN.Use; then ok "Bridge $FORGE_BRIDGE : SDN.Use présent"; else warn "SDN.Use manquant sur $SDN_PATH"; fi
 if check_priv "/sdn/zones/localnetwork/vmbr0" SDN.Use; then
@@ -149,9 +179,15 @@ title "À coller dans Forge → Réglages → Proxmox"
 echo "  URL            : https://$FORGE_GATEWAY:8006"
 echo "  Nœud           : $FORGE_NODE"
 echo "  ID du jeton    : $TOKEN_ID"
-if [[ -n "$token_secret" ]]; then
+if [[ -n "$token_secret" && -n "$SECRET_FILE" ]]; then
+	(umask 077 && printf '%s\n' "$token_secret" >"$SECRET_FILE")
+	chmod 600 "$SECRET_FILE"
+	echo "  Secret         : écrit dans $SECRET_FILE (mode 600, non affiché)"
+	warn "Après l’avoir collé dans Forge, supprimez le fichier : shred -u $SECRET_FILE"
+elif [[ -n "$token_secret" ]]; then
 	echo "  Secret         : ${C_BOLD}$token_secret${C_RESET}"
 	warn "Ce secret ne sera plus jamais affiché. Copiez-le maintenant."
+	info "Pour ne pas l’afficher la prochaine fois : FORGE_SECRET_FILE=/root/forge-token.txt bash $0"
 else
 	echo "  Secret         : (inchangé — relancez le script et régénérez le jeton si vous l’avez perdu)"
 fi

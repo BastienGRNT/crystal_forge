@@ -97,6 +97,8 @@ export interface ProxmoxApi {
 	guests(): Promise<PveGuest[]>;
 	guestConfig(vmid: number, type: 'lxc' | 'qemu'): Promise<Record<string, unknown>>;
 	permissions(path?: string): Promise<PvePermissions>;
+	/** VMID membres d'un pool (GET /pools/{pool}, exige Pool.Audit). */
+	poolMembers(pool: string): Promise<number[]>;
 	isIdFree(vmid: number): Promise<boolean>;
 	taskStatus(upid: string): Promise<PveTaskStatus>;
 	taskLog(upid: string, start: number): Promise<{ n: number; t: string }[]>;

@@ -181,6 +181,11 @@ class FakeProxmox implements ProxmoxApi {
 		return { [path]: privs(AUDITOR) };
 	}
 
+	async poolMembers(pool: string) {
+		await delay(30, 90);
+		return [...world().guests.values()].filter((g) => g.pool === pool).map((g) => g.vmid);
+	}
+
 	async isIdFree(vmid: number) {
 		await delay(20, 60);
 		return !world().guests.has(vmid);

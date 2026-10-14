@@ -67,7 +67,9 @@ export function assertCanModifyCt(ctx: SafetyContext, guest: GuestFacts, owned: 
 		);
 	}
 	if (guest.pool !== ctx.pool) {
-		throw new SafetyViolation('ct.out-of-pool', `Le CT ${guest.vmid} n'est pas dans le pool « ${ctx.pool} » : lecture seule.`);
+		// Sans Pool.Audit sur /pool/<pool>, Proxmox masque le champ « pool » : le CT paraît hors du pool.
+		const hint = guest.pool === null ? ' (s’il y est bien, le jeton n’a pas Pool.Audit : voir docs/INSTALL.md, Dépannage)' : '';
+		throw new SafetyViolation('ct.out-of-pool', `Le CT ${guest.vmid} n'est pas dans le pool « ${ctx.pool} » : lecture seule${hint}.`);
 	}
 	if (!owned.some((r) => r.type === 'pve_ct' && r.externalId === String(guest.vmid))) {
 		throw new SafetyViolation('ct.not-owned', `Le CT ${guest.vmid} n'a pas été créé par Forge : lecture seule.`);

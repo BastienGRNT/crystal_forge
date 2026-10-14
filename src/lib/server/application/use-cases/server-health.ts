@@ -7,6 +7,7 @@ import { errorMessage } from '$lib/domain/errors';
 import { inCidr } from '$lib/domain/network';
 import type { ForgeServices } from '../services';
 import { firewallPlan } from '../jobs/steps/firewall';
+import { poolAuditFix } from './connections';
 
 export type HealthStatus = 'ok' | 'warn' | 'error' | 'info';
 
@@ -59,7 +60,15 @@ export class ServerHealthService {
 					}
 					const problems = [!g.template && 'pas converti en template', g.pool !== pool && `hors du pool « ${pool} »`].filter(Boolean);
 					return problems.length
-						? { id: 'template', group: 'Proxmox', label: `Template ${templateId}`, status: 'error', detail: `« ${g.name} » : ${problems.join(', ')}.`, fix: 'Relancez infra/03-template-docker-runner.sh.' }
+						? {
+								id: 'template',
+								group: 'Proxmox',
+								label: `Template ${templateId}`,
+								status: 'error',
+								detail: `« ${g.name} » : ${problems.join(', ')}.`,
+								// Champ pool absent : souvent Pool.Audit manquant (Proxmox masque alors le pool).
+								fix: g.pool === null ? `S’il est bien dans le pool : ${poolAuditFix(pool, settings.get('proxmox.tokenId'))}` : 'Relancez infra/03-template-docker-runner.sh.'
+							}
 						: { id: 'template', group: 'Proxmox', label: `Template ${templateId}`, status: 'ok', detail: `« ${g.name} », dans le pool ${pool}.` };
 				},
 				{ id: 'template', group: 'Proxmox', label: `Template ${templateId}` }
