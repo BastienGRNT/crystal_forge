@@ -1,0 +1,24 @@
+# Forge sur le CT 150 (10.10.10.15). Voir docs/INSTALL.md.
+#   cp .env.example .env   # puis renseigner FORGE_MASTER_KEY
+#   docker compose up -d --build
+services:
+  forge:
+    build: .
+    image: forge:local
+    container_name: forge
+    restart: unless-stopped
+    # Réseau de l'hôte (le CT 150) : Forge voit directement le bridge nat
+    # (ping/ARP pour vérifier les IP libres, SSH vers les CT, API Proxmox/NPM).
+    # Le port 3000 est filtré par infra/04-forge-ct.sh (10.10.10.1 + Tailscale seulement).
+    network_mode: host
+    env_file: .env
+    environment:
+      FORGE_MODE: ${FORGE_MODE:-live}
+      DRY_RUN: ${DRY_RUN:-true}
+      PORT: 3000
+      ORIGIN: ${ORIGIN:-http://10.10.10.15:3000}
+    volumes:
+      - forge-data:/data
+
+volumes:
+  forge-data:

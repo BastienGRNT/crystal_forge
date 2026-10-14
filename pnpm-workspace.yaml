@@ -1,0 +1,7 @@
+allowBuilds:
+  esbuild: true
+  better-sqlite3: true
+  '@tailwindcss/oxide': true
+  ssh2: false
+  cpu-features: false
+  '@hugeicons/svelte': false
