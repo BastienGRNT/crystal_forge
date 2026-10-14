@@ -770,9 +770,14 @@ export class DbCommand {
 		return this.cmd;
 	}
 
+	/**
+	 * Entre parenthèses : utilisé après un « | », un `cd … && docker compose …` nu se lirait
+	 * `(… | cd …) && docker compose …` — le cd tournerait dans le sous-shell du tube et
+	 * docker compose partirait du dossier personnel, sans l'entrée standard.
+	 */
 	static #exec(l: DbLocation, script: string) {
 		assertLocation(l);
-		return `cd ${shq(`${l.repoDir}/${l.workdir}`)} && docker compose -f ${shq(l.composeFile)} exec -T ${shq(l.service)} sh -c ${shq(script)}`;
+		return `(cd ${shq(`${l.repoDir}/${l.workdir}`)} && docker compose -f ${shq(l.composeFile)} exec -T ${shq(l.service)} sh -c ${shq(script)})`;
 	}
 
 	static #dir(l: Pick<DbLocation, 'slug'>) {

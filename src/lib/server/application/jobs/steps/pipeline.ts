@@ -92,7 +92,7 @@ export const pipelineStep: StepDefinition = {
 	key: 'pipeline',
 	label: 'Pipeline & vérification',
 	async run(ctx) {
-		const { github, repos, probe } = ctx.services;
+		const { github, repos, probe, settings } = ctx.services;
 		const p = ctx.project();
 		const runId = await findOrStartRun(ctx);
 		if (runId === null) {
@@ -122,12 +122,16 @@ export const pipelineStep: StepDefinition = {
 		const domains = repos.domains.byProject(p.id);
 		if (domains.length === 0) return;
 		let anyOk = false;
+		// Depuis le bridge nat, l'IP publique ne boucle pas vers NPM (pas de NAT « en épingle ») :
+		// on joint NPM directement, avec le vrai nom de domaine (SNI, certificat Let's Encrypt, Host).
+		const npmIp = settings.get('network.npmIp');
+		ctx.log('info', `Vérification HTTPS via NPM (${npmIp}), avec le nom de domaine du projet.`);
 		for (const d of domains) {
 			const url = `https://${d.fqdn}`;
-			let res = await probe().http(url);
+			let res = await probe().http(url, undefined, { connectTo: npmIp });
 			for (let i = 0; i < 5 && !res.ok && !ctx.dryRun; i++) {
 				await ctx.sleep(ctx.services.config.mode === 'mock' ? 1000 : 8000);
-				res = await probe().http(url);
+				res = await probe().http(url, undefined, { connectTo: npmIp });
 			}
 			if (res.ok) {
 				anyOk = true;
@@ -136,6 +140,8 @@ export const pipelineStep: StepDefinition = {
 				ctx.log(ctx.dryRun ? 'dry' : 'warn', `${url} : ${res.status ? `HTTP ${res.status}` : (res.error ?? 'injoignable')}.`);
 			}
 		}
-		if (!anyOk && !ctx.dryRun) throw new Error("Aucun domaine ne répond en HTTPS (HTTP < 500). L'app écoute-t-elle bien sur le port configuré ?");
+		if (!anyOk && !ctx.dryRun) {
+			throw new Error(`Aucun domaine ne répond en HTTPS via NPM (${npmIp}) avec un statut < 500. L'app écoute-t-elle bien sur le port ${p.appPort} ? Le certificat est-il émis ?`);
+		}
 	}
 };

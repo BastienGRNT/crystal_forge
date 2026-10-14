@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createFakeApis } from '$server/infrastructure/mock/fake-apis';
 import { resetWorld, world } from '$server/infrastructure/mock/world';
-import { ProxmoxGateway } from './gateways';
+import { DbCommand, ProxmoxGateway } from './gateways';
 import { WriteGuard } from './guard';
 import { SettingsService, type SettingsStore } from './settings';
 
@@ -66,5 +66,18 @@ describe('ProxmoxGateway — CT cloné depuis un template protégé', () => {
 		const pve = gateway();
 		await expect(pve.destroy(402)).rejects.toThrow(/production protégé/);
 		expect(world().guests.has(402)).toBe(true);
+	});
+});
+
+describe('DbCommand', () => {
+	const loc = { repoDir: '/home/github/actions-runner/_work/app/app', workdir: '.', composeFile: 'docker-compose.prod.yml', service: 'db', kind: 'postgres' as const, slug: 'app' };
+
+	it('la requête lue sur le tube atteint docker compose DANS le dossier du dépôt', () => {
+		const cmd = DbCommand.query(loc, 'select 1', true).toString();
+		expect(cmd).toContain(`| base64 -d | (cd '/home/github/actions-runner/_work/app/app/.' && docker compose -f 'docker-compose.prod.yml' exec -T 'db'`);
+	});
+
+	it('restauration : même regroupement après gunzip', () => {
+		expect(DbCommand.restore(loc, '20261014-120000-manual.sql.gz').toString()).toMatch(/gunzip -c '[^']+' \| \(cd '/);
 	});
 });

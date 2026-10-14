@@ -143,6 +143,19 @@ export class ServerHealthService {
 				async () => {
 					const ip = settings.get('network.publicIp');
 					const r = await this.s.probe().http(`http://${ip}`, 5000);
+					if (r.status === null) {
+						// Sans NAT « en épingle », l'IP publique est injoignable depuis le bridge : on teste NPM en direct.
+						const npm = await this.s.probe().http(`http://${settings.get('network.npmIp')}`, 5000);
+						if (npm.status !== null) {
+							return {
+								id: 'public',
+								group: 'Réseau',
+								label: 'Ports 80/443 → NPM',
+								status: 'info',
+								detail: `NPM répond en direct (HTTP ${npm.status}). http://${ip} n'est pas joignable depuis le bridge (pas de NAT en épingle) : testez-le depuis l'extérieur.`
+							};
+						}
+					}
 					return r.status !== null
 						? { id: 'public', group: 'Réseau', label: 'Ports 80/443 → NPM', status: 'ok', detail: `http://${ip} répond (HTTP ${r.status}, ${r.ms} ms).` }
 						: {

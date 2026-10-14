@@ -2,7 +2,8 @@
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { connect } from 'node:net';
-import { fetch } from 'undici';
+import type { LookupFunction } from 'node:net';
+import { Agent, fetch } from 'undici';
 import { isIpv4 } from '$lib/domain/network';
 import type { ProbeApi, ResolverApi } from '$server/application/ports';
 
@@ -40,15 +41,21 @@ export class NetworkProbe implements ProbeApi {
 		});
 	}
 
-	async http(url: string, timeoutMs = 10_000) {
+	async http(url: string, timeoutMs = 10_000, opts: { connectTo?: string } = {}) {
 		const start = Date.now();
+		const ip = opts.connectTo && isIpv4(opts.connectTo) ? opts.connectTo : null;
+		// Résolution forcée : la connexion part vers `ip`, le nom reste celui de l'URL (SNI, certificat, Host).
+		const lookup: LookupFunction = (_host, o, cb) => (o.all ? cb(null, [{ address: ip as string, family: 4 }]) : cb(null, ip as string, 4));
+		const dispatcher = ip ? new Agent({ connect: { lookup } as never }) : undefined;
 		try {
-			const res = await fetch(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
+			const res = await fetch(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(timeoutMs), dispatcher });
 			await res.body?.cancel();
 			return { ok: res.status < 500, status: res.status, error: null, ms: Date.now() - start };
 		} catch (err) {
 			const cause = (err as { cause?: { code?: string; message?: string } }).cause;
 			return { ok: false, status: null, error: cause?.code ?? cause?.message ?? (err as Error).message, ms: Date.now() - start };
+		} finally {
+			await dispatcher?.close().catch(() => {});
 		}
 	}
 }

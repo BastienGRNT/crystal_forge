@@ -329,7 +329,11 @@ export interface ProbeApi {
 	/** null si l'ARP n'est pas observable depuis cette machine (pas sur le même L2). */
 	arpHas(ip: string): Promise<boolean | null>;
 	tcpOpen(host: string, port: number, timeoutMs?: number): Promise<boolean>;
-	http(url: string, timeoutMs?: number): Promise<{ ok: boolean; status: number | null; error: string | null; ms: number }>;
+	/**
+	 * GET sans suivre les redirections. `connectTo` : IP à joindre à la place de celle du DNS
+	 * (le nom reste utilisé pour SNI, le certificat et l'en-tête Host).
+	 */
+	http(url: string, timeoutMs?: number, opts?: { connectTo?: string }): Promise<{ ok: boolean; status: number | null; error: string | null; ms: number }>;
 }
 
 export interface ResolverApi {
