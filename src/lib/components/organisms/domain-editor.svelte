@@ -23,7 +23,7 @@
 		rows = $bindable([]),
 		zones,
 		publicIp,
-		max = 5
+		max = 20
 	}: { rows?: DomainRow[]; zones: string[]; publicIp: string; max?: number } = $props();
 
 	const OTHER = '__other__';
