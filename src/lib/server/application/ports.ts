@@ -301,6 +301,14 @@ export interface NpmCreateProxyHost {
 	meta: { letsencrypt_agree: boolean; letsencrypt_email: string; dns_challenge: boolean };
 }
 
+/** Identifiants OVH confiés à NPM pour que certbot crée l'enregistrement TXT du challenge. */
+export interface OvhDnsCredentials {
+	endpoint: string;
+	appKey: string;
+	appSecret: string;
+	consumerKey: string;
+}
+
 export interface NpmApi {
 	health(): Promise<{ status: string; version: string }>;
 	me(): Promise<NpmUser>;
@@ -312,6 +320,8 @@ export interface NpmApi {
 	updateProxyHost(id: number, patch: { forward_host: string; forward_port: number }): Promise<NpmProxyHost>;
 	deleteProxyHost(id: number): Promise<void>;
 	deleteCertificate(id: number): Promise<void>;
+	/** Certificat Let's Encrypt par challenge DNS OVH (obligatoire pour un wildcard). */
+	createDnsCertificate(input: { domain: string; email: string; ovh: OvhDnsCredentials }): Promise<NpmCertificate>;
 	/** Liste d'accès NPM protégée par un identifiant et un mot de passe (authentification basique). */
 	createAccessList(name: string, username: string, password: string): Promise<{ id: number }>;
 	deleteAccessList(id: number): Promise<void>;

@@ -816,11 +816,18 @@ class FakeOvh implements OvhApi {
 // Nginx Proxy Manager
 // =================================================================================
 
+/** Un enregistrement répond pour ce sous-domaine (lui-même ou un wildcard qui le couvre). */
+function recordCovers(recordSub: string, sub: string): boolean {
+	if (recordSub === sub) return true;
+	if (recordSub === '*') return sub !== '';
+	return recordSub.startsWith('*.') && sub.endsWith(recordSub.slice(1));
+}
+
 function publiclyResolves(fqdn: string): boolean {
 	for (const [zone, records] of world().zones) {
 		const sub = fqdn === zone ? '' : fqdn.endsWith(`.${zone}`) ? fqdn.slice(0, -(zone.length + 1)) : null;
 		if (sub === null) continue;
-		return records.some((r) => r.fieldType === 'A' && r.subDomain === sub && r.visibleAt <= Date.now());
+		return records.some((r) => r.fieldType === 'A' && recordCovers(r.subDomain, sub) && r.visibleAt <= Date.now());
 	}
 	return false;
 }
@@ -910,6 +917,15 @@ class FakeNpm implements NpmApi {
 		await delay();
 		const w = world();
 		w.npmCerts = w.npmCerts.filter((c) => c.id !== id);
+	}
+
+	async createDnsCertificate(input: { domain: string; email: string; ovh: unknown }) {
+		await delay(2500, 4000); // challenge DNS + propagation
+		const w = world();
+		const id = w.nextNpmId++;
+		const expiresOn = new Date(Date.now() + 90 * 86400_000).toISOString().replace('T', ' ').slice(0, 19);
+		w.npmCerts.push({ id, domainNames: [input.domain], expiresOn });
+		return { id, niceName: input.domain, domainNames: [input.domain], expiresOn, provider: 'letsencrypt' };
 	}
 
 	async createAccessList(_name: string, _username: string, _password: string) {
@@ -1158,7 +1174,7 @@ class FakeResolver implements ResolverApi {
 		for (const [zone, records] of world().zones) {
 			const sub = name === zone ? '' : name.endsWith(`.${zone}`) ? name.slice(0, -(zone.length + 1)) : null;
 			if (sub === null) continue;
-			return records.filter((r) => r.fieldType === 'A' && r.subDomain === sub && r.visibleAt <= Date.now()).map((r) => r.target);
+			return records.filter((r) => r.fieldType === 'A' && recordCovers(r.subDomain, sub) && r.visibleAt <= Date.now()).map((r) => r.target);
 		}
 		return [];
 	}

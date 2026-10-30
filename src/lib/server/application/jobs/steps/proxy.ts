@@ -1,6 +1,6 @@
 /** Étape 6 — Proxy host NPM + certificat Let's Encrypt, un par domaine. */
 import { randomBytes } from 'node:crypto';
-import { servesDomain } from '$lib/domain/domain-name';
+import { isWildcard, servesDomain } from '$lib/domain/domain-name';
 import type { StepDefinition } from '../types';
 import { requireIp } from './common';
 import { targetDomains } from './dns';
@@ -84,6 +84,23 @@ export const proxyStep: StepDefinition = {
 					continue;
 				}
 				throw new Error(`Un proxy host NPM existe déjà pour ${d.fqdn} (#${existing.id} → ${existing.forwardHost}:${existing.forwardPort}), créé hors Forge. Rien n'est écrasé.`);
+			}
+			// Wildcard : certificat par challenge DNS OVH (le challenge HTTP ne sait pas valider un « * »).
+			if (isWildcard(d.fqdn) && !reuseCert) {
+				const certs = await proxy.listCertificates();
+				const same = certs.filter((c) => c.domainNames.some((n) => n.toLowerCase() === d.fqdn.toLowerCase()) && certStillValid(c.expiresOn)).sort((a, b) => b.id - a.id)[0];
+				if (same) {
+					reuseCert = same.id;
+					ctx.log('info', `${d.fqdn} : certificat wildcard #${same.id} déjà présent dans NPM, réutilisé.`);
+				} else {
+					if (d.mode !== 'ovh' || !d.zone) throw new Error(`${d.fqdn} : un wildcard exige un domaine géré chez OVH (challenge DNS). Ajoutez le certificat wildcard dans NPM à la main, puis « Reprendre ».`);
+					ctx.log('info', `${d.fqdn} : demande du certificat wildcard par challenge DNS OVH (propagation : 2-3 min)…`);
+					const ovh = await ctx.services.ovhCredentialsFor(d.zone);
+					const cert = await proxy.createDnsCertificate({ domain: d.fqdn, email, ovh });
+					ctx.recordResource('npm_certificate', cert.id, { fqdn: d.fqdn });
+					reuseCert = cert.id;
+					ctx.log('success', `${d.fqdn} : certificat #${cert.id} créé.`);
+				}
 			}
 			if (!reuseCert) ctx.log('info', `${d.fqdn} : création du proxy host et demande du certificat Let's Encrypt (jusqu'à 2-3 min)…`);
 			const host = await proxy.createProxyHost({ domain: d.fqdn, forwardHost: ip, forwardPort: p.appPort, email, certificateId: reuseCert, accessListId });

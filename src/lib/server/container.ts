@@ -24,6 +24,7 @@ import type { ForgeServices } from './application/services';
 import { SettingsService } from './application/settings';
 import { GithubClient } from './infrastructure/clients/github';
 import { NpmClient } from './infrastructure/clients/npm';
+import { UserFacingError } from '$lib/domain/errors';
 import { OvhClient } from './infrastructure/clients/ovh';
 import { DohResolver, NetworkProbe } from './infrastructure/clients/probe';
 import { ProxmoxClient } from './infrastructure/clients/proxmox';
@@ -216,6 +217,16 @@ function build(): Forge {
 			if (p && !p.sshHostKey) projects.update(p.id, { sshHostKey: fp });
 		}),
 		githubOwners: deps.githubOwners,
+		ovhCredentialsFor: async (zone) => {
+			const main = { endpoint: settings.get('ovh.endpoint'), appKey: settings.get('ovh.appKey'), appSecret: settings.get('ovh.appSecret'), consumerKey: settings.get('ovh.consumerKey') };
+			if (config.mode === 'mock') return main;
+			const candidates = [main, ...accounts.ovhAccounts().map((a) => a.config)].filter((c) => c.appKey && c.appSecret && c.consumerKey);
+			for (const c of candidates) {
+				const zones = await new OvhClient(c).listZones().catch(() => [] as string[]);
+				if (zones.some((z) => z.toLowerCase() === zone.toLowerCase())) return c;
+			}
+			throw new UserFacingError(`Aucun compte OVH connecté ne gère la zone ${zone}.`);
+		},
 		probe: () => apis().probe,
 		resolver: () => apis().resolver,
 		repos: { projects, domains, jobs, resources }

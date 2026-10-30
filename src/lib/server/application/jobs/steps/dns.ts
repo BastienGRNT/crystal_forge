@@ -1,4 +1,5 @@
 /** Étape 5 — DNS : enregistrements A chez OVH (ou à la main), puis attente de la résolution publique. */
+import { isWildcard, wildcardProbe } from '$lib/domain/domain-name';
 import { wildcardCovering } from '$lib/domain/safety-policy';
 import type { DomainRow } from '$server/infrastructure/db/schema';
 import type { StepContext, StepDefinition } from '../types';
@@ -48,7 +49,7 @@ export const dnsStep: StepDefinition = {
 				);
 				continue;
 			}
-			const wildcard = wildcardCovering(d.subdomain, await dns.wildcardRecords(d.zone, d.subdomain));
+			const wildcard = isWildcard(d.subdomain) ? undefined : wildcardCovering(d.subdomain, await dns.wildcardRecords(d.zone, d.subdomain));
 			if (wildcard) ctx.log('warn', `${d.fqdn} : un wildcard ${wildcard.subDomain}.${d.zone} (${wildcard.fieldType} → ${wildcard.target}) couvre déjà ce nom.`);
 
 			const rec = await dns.createARecord(d.zone, d.subdomain);
@@ -80,8 +81,9 @@ export const dnsStep: StepDefinition = {
 			await waitFor(
 				ctx,
 				async () => {
+					// Wildcard : on teste un nom quelconque qu'il couvre.
 					const ips = await resolver()
-						.resolveA(d.fqdn)
+						.resolveA(wildcardProbe(d.fqdn))
 						.catch(() => [] as string[]);
 					last = ips.join(', ');
 					return ips.includes(publicIp);

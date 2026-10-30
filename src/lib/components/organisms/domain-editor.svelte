@@ -65,7 +65,7 @@
 		<div class="rounded-lg border bg-muted/20 p-3">
 			<div class="flex flex-col gap-2 sm:flex-row sm:items-center">
 				<div class="flex min-w-0 flex-1 items-center gap-2">
-					<Input bind:value={row.subdomain} placeholder="sous-domaine (vide = racine)" class="min-w-0 flex-1 font-mono" aria-label="Sous-domaine" />
+					<Input bind:value={row.subdomain} placeholder="sous-domaine (vide = racine, *.site = wildcard)" class="min-w-0 flex-1 font-mono" aria-label="Sous-domaine" />
 					<span class="text-muted-foreground">.</span>
 					{#if row.custom}
 						<Input bind:value={row.zone} placeholder="exemple.com" class="min-w-0 flex-1 font-mono" aria-label="Domaine" />

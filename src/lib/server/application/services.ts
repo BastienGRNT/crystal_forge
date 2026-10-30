@@ -3,7 +3,7 @@ import type { DomainRepo, JobRepo, ProjectRepo, ResourceRepo } from '$server/inf
 import type { EventBus } from './events';
 import type { DnsGateway, GithubGateway, ProxmoxGateway, ProxyGateway, ShellGateway } from './gateways';
 import type { WriteGuard } from './guard';
-import type { ProbeApi, ResolverApi } from './ports';
+import type { OvhDnsCredentials, ProbeApi, ResolverApi } from './ports';
 import type { Redactor } from './redactor';
 import type { Cipher, SettingsService } from './settings';
 
@@ -22,6 +22,8 @@ export interface ForgeServices {
 	shell: ShellGateway;
 	/** Propriétaires GitHub autorisés (compte principal + comptes supplémentaires). */
 	githubOwners: () => string[];
+	/** Identifiants OVH du compte qui gère la zone (confiés à NPM pour le challenge DNS d'un wildcard). */
+	ovhCredentialsFor: (zone: string) => Promise<OvhDnsCredentials>;
 	probe: () => ProbeApi;
 	resolver: () => ResolverApi;
 	repos: {

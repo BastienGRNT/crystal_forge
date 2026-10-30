@@ -4,6 +4,7 @@
  * avec la règle de sécurité correspondante en `check`.
  */
 import { SafetyViolation } from '$lib/domain/errors';
+import { isWildcard } from '$lib/domain/domain-name';
 import { ipsFromGuestConfig } from '$lib/domain/network';
 import type { SqlDbKind } from '$lib/domain/compose-analysis';
 import { BACKUP_ROOT, dumpScript, isValidBackupName, MAX_RESULT_BYTES, queryScript, restoreScript } from '$lib/domain/database';
@@ -31,8 +32,10 @@ import { TtlCache } from './cache';
 import { DRY_PREFIX, isSimulated, type WriteGuard, type WriteOp } from './guard';
 import type {
 	ExternalApis,
+	NpmCertificate,
 	NpmCreateProxyHost,
 	NpmProxyHost,
+	OvhDnsCredentials,
 	OvhRecord,
 	PowerAction,
 	PveFirewallRule,
@@ -650,7 +653,16 @@ export class ProxyGateway {
 			summary: `Créer le proxy host ${input.domain} → http://${input.forwardHost}:${input.forwardPort} (${input.certificateId ? `certificat #${input.certificateId} réutilisé` : "Let's Encrypt"}, SSL forcé, HTTP/2, websockets)`,
 			check: async () => {
 				if (input.accessListId && input.accessListId > 0) assertOwned('npm_access_list', input.accessListId, this.d.ownership.owned('npm_access_list'), "La liste d'accès");
-				if (input.certificateId) assertOwned('npm_certificate', input.certificateId, this.d.ownership.owned('npm_certificate'), 'Le certificat');
+				if (input.certificateId) {
+					// Certificat créé par Forge, ou certificat existant qui couvre exactement ce domaine (wildcard ajouté à la main).
+					const mine = this.d.ownership.owned('npm_certificate').some((r) => r.externalId === String(input.certificateId));
+					if (!mine) {
+						const cert = (await this.api.listCertificates()).find((c) => c.id === input.certificateId);
+						if (!cert || !cert.domainNames.some((n) => n.toLowerCase() === input.domain.toLowerCase())) {
+							assertOwned('npm_certificate', input.certificateId, this.d.ownership.owned('npm_certificate'), 'Le certificat');
+						}
+					}
+				}
 				const hosts = await this.api.listProxyHosts();
 				assertCanCreateProxyHost(
 					this.d.settings.safetyContext(),
@@ -711,6 +723,24 @@ export class ProxyGateway {
 			check: () => assertOwned('npm_proxy_host', id, this.d.ownership.owned('npm_proxy_host'), 'Le proxy host'),
 			execute: () => this.api.deleteProxyHost(id),
 			simulate: () => undefined
+		});
+	}
+
+	/** Certificat wildcard par challenge DNS OVH (les identifiants sont confiés à NPM, jamais journalisés). */
+	createDnsCertificate(input: { domain: string; email: string; ovh: OvhDnsCredentials }): Promise<NpmCertificate> {
+		return this.#run({
+			system: 'npm',
+			action: 'certificate.create',
+			summary: `Demander le certificat Let's Encrypt ${input.domain} (challenge DNS OVH)`,
+			check: async () => {
+				if (!isWildcard(input.domain)) throw new SafetyViolation('npm.cert', `Le challenge DNS n'est utilisé que pour un wildcard (${input.domain}).`);
+				const certs = await this.api.listCertificates();
+				if (certs.some((c) => c.domainNames.some((d) => d.toLowerCase() === input.domain.toLowerCase()))) {
+					throw new SafetyViolation('npm.cert-exists', `Un certificat existe déjà pour ${input.domain} : rien n'est écrasé.`);
+				}
+			},
+			execute: () => this.api.createDnsCertificate(input),
+			simulate: () => ({ id: -Date.now(), niceName: input.domain, domainNames: [input.domain], expiresOn: null, provider: 'letsencrypt' })
 		});
 	}
 

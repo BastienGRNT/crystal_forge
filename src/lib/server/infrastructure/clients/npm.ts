@@ -4,7 +4,7 @@
  * NPM n'a pas de permission « ajout seulement » : la règle est appliquée par ProxyGateway.
  */
 import { ExternalApiError } from '$lib/domain/errors';
-import type { NpmApi, NpmCertificate, NpmCreateProxyHost, NpmProxyHost, NpmUser } from '$server/application/ports';
+import type { NpmApi, NpmCertificate, NpmCreateProxyHost, NpmProxyHost, NpmUser, OvhDnsCredentials } from '$server/application/ports';
 import { httpRequest, parseJson } from './http';
 
 export interface NpmConfig {
@@ -133,6 +133,24 @@ export class NpmClient implements NpmApi {
 
 	async deleteCertificate(id: number) {
 		await this.#call('DELETE', `/nginx/certificates/${id}`);
+	}
+
+	async createDnsCertificate(input: { domain: string; email: string; ovh: OvhDnsCredentials }) {
+		const endpoint = /\/\/ca\./.test(input.ovh.endpoint) ? 'ovh-ca' : /us\./.test(input.ovh.endpoint) ? 'ovh-us' : 'ovh-eu';
+		const credentials = [
+			`dns_ovh_endpoint = ${endpoint}`,
+			`dns_ovh_application_key = ${input.ovh.appKey}`,
+			`dns_ovh_application_secret = ${input.ovh.appSecret}`,
+			`dns_ovh_consumer_key = ${input.ovh.consumerKey}`
+		].join('\n');
+		const body = {
+			provider: 'letsencrypt',
+			domain_names: [input.domain],
+			meta: { letsencrypt_email: input.email, letsencrypt_agree: true, dns_challenge: true, dns_provider: 'ovh', dns_provider_credentials: credentials, propagation_seconds: 60 }
+		};
+		// Challenge DNS + propagation : plusieurs minutes possibles.
+		const r = await this.#call<{ id: number; nice_name?: string; domain_names: string[]; expires_on?: string | null; provider?: string }>('POST', '/nginx/certificates', body, 360_000);
+		return { id: r.id, niceName: r.nice_name ?? input.domain, domainNames: r.domain_names ?? [input.domain], expiresOn: r.expires_on ?? null, provider: r.provider ?? 'letsencrypt' };
 	}
 
 	async createAccessList(name: string, username: string, password: string) {

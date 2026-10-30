@@ -5,13 +5,25 @@ export function isValidZone(zone: string): boolean {
 	return parts.length >= 2 && parts.every((p) => LABEL_RE.test(p)) && zone.length <= 253;
 }
 
-/** Sous-domaine : vide (domaine racine) ou un ou plusieurs labels (« api », « api.v2 »). */
+/**
+ * Sous-domaine : vide (domaine racine) ou un ou plusieurs labels (« api », « api.v2 »).
+ * Le premier label peut être « * » (wildcard : « * », « *.site »).
+ */
 export function isValidSubdomain(sub: string): boolean {
 	if (sub === '') return true;
 	return sub
 		.toLowerCase()
 		.split('.')
-		.every((p) => LABEL_RE.test(p));
+		.every((p, i) => (i === 0 && p === '*') || LABEL_RE.test(p));
+}
+
+export function isWildcard(nameOrSub: string): boolean {
+	return nameOrSub === '*' || nameOrSub.startsWith('*.');
+}
+
+/** Nom réel à tester pour un wildcard (« *.site.x.fr » → « forge-check.site.x.fr »). */
+export function wildcardProbe(fqdn: string): string {
+	return isWildcard(fqdn) ? `forge-check${fqdn.slice(1)}` : fqdn;
 }
 
 export function normalizeSubdomain(sub: string): string {
