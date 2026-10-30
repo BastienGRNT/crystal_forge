@@ -15,11 +15,19 @@ const CONCLUSION_FR: Record<string, string> = {
 async function findOrStartRun(ctx: StepContext): Promise<number | null> {
 	const { github } = ctx.services;
 	const p = ctx.project();
-	if (typeof ctx.state.runId === 'number') return ctx.state.runId;
+	let retry = false;
+	if (typeof ctx.state.runId === 'number') {
+		// Reprise : un run déjà terminé en échec ne se « suit » pas (il échouerait aussitôt), on en relance un neuf.
+		const old = ctx.dryRun ? null : await github.api.getRun(p.repoOwner, p.repoName, ctx.state.runId).catch(() => null);
+		if (!old || old.status !== 'completed' || old.conclusion === 'success') return ctx.state.runId;
+		ctx.log('info', `Le run #${old.runNumber} déjà suivi s'est terminé en « ${CONCLUSION_FR[old.conclusion ?? ''] ?? old.conclusion} » : nouveau run (workflow_dispatch).`);
+		delete ctx.state.runId;
+		retry = true;
+	}
 
 	// Le commit du workflow a déjà déclenché un run « push » : on le suit au lieu d'en lancer un second.
 	const commitSha = ctx.stepState('workflow').commitSha as string | undefined;
-	if (commitSha && !ctx.params.forceDispatch && !ctx.dryRun) {
+	if (commitSha && !ctx.params.forceDispatch && !ctx.dryRun && !retry) {
 		ctx.log('info', `Recherche du run déclenché par le commit ${commitSha.slice(0, 7)}…`);
 		for (let i = 0; i < 6; i++) {
 			const runs = await github.api.listWorkflowRuns(p.repoOwner, p.repoName, workflowFileFor(p.environment), 10);
@@ -32,7 +40,7 @@ async function findOrStartRun(ctx: StepContext): Promise<number | null> {
 		}
 	}
 
-	if (commitSha && !ctx.params.forceDispatch && !ctx.dryRun) ctx.log('info', 'Aucun run lié au commit : lancement manuel (workflow_dispatch).');
+	if (commitSha && !ctx.params.forceDispatch && !ctx.dryRun && !retry) ctx.log('info', 'Aucun run lié au commit : lancement manuel (workflow_dispatch).');
 	const t0 = Date.now();
 	const res = await github.dispatch(p.repoOwner, p.repoName, workflowFileFor(p.environment), p.branch);
 	if (ctx.dryRun) return null;
