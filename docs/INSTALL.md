@@ -281,6 +281,7 @@ GitHub → Settings → Developer settings → **Fine-grained tokens** → *Gene
 | Permission | Accès | Utilisé pour |
 |---|---|---|
 | **Administration** | **Read and write** | jeton d'enregistrement / retrait du runner |
+| **Environments** | **Read and write** | environnements GitHub `development` (serveurs dev) et leurs secrets |
 | Secrets | Read and write | secret `ENV_FILE` |
 | Variables | Read and write | variables `FORGE_*` |
 | Actions | Read and write | lancer et suivre les runs |
@@ -289,6 +290,8 @@ GitHub → Settings → Developer settings → **Fine-grained tokens** → *Gene
 | Metadata | Read-only | obligatoire |
 
 **Administration en « Read and write » est indispensable.** Sans elle, ou si le dépôt n'est pas inclus dans *Repository access*, la création du jeton d'enregistrement du runner échoue avec « Resource not accessible by personal access token ». Le test de connexion vérifie la lecture (liste des runners d'un dépôt) ; l'écriture ne peut être vérifiée qu'au premier déploiement, sans créer de jeton.
+
+**Environments** est requis dès qu'un serveur dev est créé : sans lui, l'étape « Secrets & variables » échoue avec « Resource not accessible by personal access token (GitHub attend : environments=read) ». Ajoutez la permission au jeton existant (elle s'applique immédiatement, sans régénérer le jeton), puis cliquez sur **Reprendre** sur le job.
 
 Pour le bouton **Mettre à jour Forge**, le jeton doit aussi pouvoir lire le dépôt `crystal_forge` (*Contents : Read*, déjà couvert si le dépôt est inclus).
 

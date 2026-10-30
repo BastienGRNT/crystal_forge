@@ -244,7 +244,7 @@ export class ConnectionTester {
 		items.push({
 			label: 'Permissions',
 			status: 'ok',
-			detail: 'Secrets, Variables, Actions, Contents, Workflows : vérifiées à la première utilisation sur un dépôt'
+			detail: 'Environments, Secrets, Variables, Actions, Contents, Workflows : vérifiées à la première utilisation sur un dépôt'
 		});
 		return `${me.login} — ${repos.length} dépôts`;
 	}

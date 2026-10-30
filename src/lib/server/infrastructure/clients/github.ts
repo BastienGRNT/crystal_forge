@@ -9,6 +9,26 @@ import type { GhDirEntry, GhRepo, GhRun, GhRunJob, GhRunner, GithubApi } from '$
 /** Opérations qui exigent la permission « Administration » du jeton fine-grained. */
 const ADMIN_OPS = ["jeton d'enregistrement du runner", 'jeton de retrait du runner', 'retrait du runner', 'liste des runners'];
 
+/** Permissions fine-grained nommées comme dans l'interface GitHub (« environments=read » → « Environments »). */
+const PERMISSION_LABELS: Record<string, string> = {
+	administration: 'Administration',
+	environments: 'Environments',
+	secrets: 'Secrets',
+	variables: 'Variables',
+	actions: 'Actions',
+	contents: 'Contents',
+	workflows: 'Workflows'
+};
+
+function neededPermissions(accepted?: string): string {
+	const names = new Set<string>();
+	for (const part of (accepted ?? '').split(',')) {
+		const label = PERMISSION_LABELS[part.trim().split('=')[0] ?? ''];
+		if (label) names.add(label);
+	}
+	return [...names].map((n) => `« ${n} : Read and write »`).join(', ');
+}
+
 /** Message d'erreur GitHub lisible, avec la permission manquante quand on peut la déduire. */
 export function explainGithubError(e: { status?: number; message: string; acceptedPermissions?: string }, what: string): string {
 	let msg = e.message;
@@ -17,7 +37,9 @@ export function explainGithubError(e: { status?: number; message: string; accept
 		const needed = e.acceptedPermissions ? ` (GitHub attend : ${e.acceptedPermissions})` : '';
 		msg = ADMIN_OPS.some((op) => what.startsWith(op))
 			? `${msg}${needed} — le jeton fine-grained n'a pas la permission « Administration : Read and write » sur ce dépôt, ou le dépôt n'est pas inclus dans le jeton (Repository access). Corrigez-le dans GitHub → Settings → Developer settings → Fine-grained tokens.`
-			: `${msg}${needed} — vérifiez les permissions du jeton fine-grained et que le dépôt est inclus dans « Repository access »`;
+			: `${msg}${needed} — ${
+					neededPermissions(e.acceptedPermissions) ? `donnez ${neededPermissions(e.acceptedPermissions)} au jeton fine-grained` : 'vérifiez les permissions du jeton fine-grained'
+				} et vérifiez que le dépôt est inclus dans « Repository access »`;
 	}
 	return `${what} : ${msg}`;
 }
@@ -298,7 +320,8 @@ export class GithubClient implements GithubApi {
 		try {
 			if (environment) {
 				await this.#o.rest.actions.createOrUpdateEnvironmentSecret({
-					owner, repo,
+					owner,
+					repo,
 					environment_name: environment,
 					secret_name: name,
 					encrypted_value: encryptedValue,

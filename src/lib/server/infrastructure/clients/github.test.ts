@@ -21,6 +21,11 @@ describe('explainGithubError', () => {
 		expect(msg).toContain('permissions du jeton');
 	});
 
+	it('environnement refusé : nomme la permission Environments', () => {
+		const msg = explainGithubError({ status: 403, message: NOT_ACCESSIBLE, acceptedPermissions: 'environments=read' }, 'clé publique des secrets');
+		expect(msg).toContain('« Environments : Read and write »');
+	});
+
 	it('401 : jeton invalide', () => {
 		expect(explainGithubError({ status: 401, message: 'Bad credentials' }, 'identification')).toBe('identification : jeton invalide ou expiré');
 	});
