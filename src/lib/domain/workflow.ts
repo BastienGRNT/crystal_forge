@@ -166,6 +166,8 @@ ${indent(workflowBackupScript(slug), 10)}
           # Une image à la fois : plusieurs builds en parallèle (pnpm install, dotnet…) saturent la RAM
           # du CT et le runner perd la communication avec GitHub.
           COMPOSE_PARALLEL_LIMIT: 1
+          # Compose récent délègue le build à « bake », qui ignore la limite ci-dessus et construit tout en parallèle.
+          COMPOSE_BAKE: false
         run: |
           set -euo pipefail
           cd "\${FORGE_WORKDIR:-.}"
