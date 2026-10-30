@@ -13,6 +13,7 @@
 		projects,
 		activeJobs,
 		host,
+		user,
 		children
 	}: {
 		mode: 'live' | 'mock';
@@ -20,6 +21,7 @@
 		projects: { slug: string; name: string; status: string }[];
 		activeJobs: number;
 		host: { memUsed: number; memTotal: number; cpu: number } | null;
+		user: { username: string; role: 'admin' | 'collaborator' };
 		children: Snippet;
 	} = $props();
 	let mobileOpen = $state(false);
@@ -27,7 +29,7 @@
 
 <div class="flex min-h-dvh">
 	<aside class="sticky top-0 hidden h-dvh w-64 shrink-0 border-r border-sidebar-border bg-sidebar lg:block">
-		<AppSidebar {projects} {activeJobs} {host} />
+		<AppSidebar {projects} {activeJobs} {host} {user} />
 	</aside>
 
 	<div class="flex min-w-0 flex-1 flex-col">
@@ -40,7 +42,7 @@
 					{/snippet}
 				</Sheet.Trigger>
 				<Sheet.Content side="left" class="w-72 bg-sidebar p-0">
-					<AppSidebar {projects} {activeJobs} {host} onNavigate={() => (mobileOpen = false)} />
+					<AppSidebar {projects} {activeJobs} {host} {user} onNavigate={() => (mobileOpen = false)} />
 				</Sheet.Content>
 			</Sheet.Root>
 			<a href="/"><Logo /></a>

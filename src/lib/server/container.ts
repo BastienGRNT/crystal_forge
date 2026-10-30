@@ -6,6 +6,8 @@ import { ConnectionTester } from './application/use-cases/connections';
 import { DashboardService } from './application/use-cases/dashboard';
 import { WizardService } from './application/use-cases/wizard';
 import { ProjectService } from './application/use-cases/projects';
+import { AccountService } from './application/accounts';
+import { routeGithub, routeOvh } from './infrastructure/account-routing';
 import { AuthService } from './application/use-cases/auth';
 import { JobQueries } from './application/use-cases/jobs';
 import { DatabaseService } from './application/use-cases/database';
@@ -29,7 +31,7 @@ import { generateForgeKeyPair, SshClient } from './infrastructure/clients/ssh';
 import { getConfig } from './infrastructure/config';
 import { SecretBox } from './infrastructure/crypto/secret-box';
 import { openDatabase } from './infrastructure/db/client';
-import { AuthRepo, DomainRepo, JobRepo, ProjectRepo, ResourceRepo, SettingsRepo } from './infrastructure/db/repositories';
+import { AccountRepo, AuditRepo, AuthRepo, DomainRepo, JobRepo, ProjectRepo, ResourceRepo, SettingsRepo } from './infrastructure/db/repositories';
 import { createFakeApis } from './infrastructure/mock/fake-apis';
 import { seedMockDatabase } from './infrastructure/mock/seed';
 import { resetWorld } from './infrastructure/mock/world';
@@ -38,6 +40,8 @@ import { exportPublicKey, importProvisioning } from './application/provisioning'
 export interface Forge extends ForgeServices {
 	engine: JobEngine;
 	auth: AuthService;
+	audit: AuditRepo;
+	accounts: AccountService;
 	dashboard: DashboardService;
 	wizard: WizardService;
 	projects: ProjectService;
@@ -57,7 +61,7 @@ export interface Forge extends ForgeServices {
  * l'empreinte de sa configuration : un changement (URL, jeton, CA…) en reconstruit un
  * neuf, avec son propre dispatcher TLS — jamais l'ancien.
  */
-function liveApis(settings: SettingsService): () => ExternalApis {
+function liveApis(settings: SettingsService, accounts: AccountService): () => ExternalApis {
 	let cache: Partial<Record<keyof ExternalApis, { sig: string; client: object }>> = {};
 	settings.onChange(() => {
 		cache = {};
@@ -81,6 +85,16 @@ function liveApis(settings: SettingsService): () => ExternalApis {
 				return typeof v === 'function' ? v.bind(target) : v;
 			}
 		});
+	// Clients des comptes supplémentaires : un par configuration, reconstruits si les comptes changent.
+	let extras = new Map<string, object>();
+	accounts.onChange(() => {
+		extras = new Map();
+	});
+	const extraClient = <C extends object>(sig: string, make: () => C): C => {
+		let c = extras.get(sig);
+		if (!c) extras.set(sig, (c = make()));
+		return c as C;
+	};
 	const apis: ExternalApis = {
 		proxmox: lazy(
 			'proxmox',
@@ -93,18 +107,44 @@ function liveApis(settings: SettingsService): () => ExternalApis {
 			}),
 			(c) => new ProxmoxClient(c)
 		),
-		github: lazy('github', () => settings.get('github.token'), (t) => new GithubClient(t)),
-		ovh: lazy(
-			'ovh',
-			() => ({
-				endpoint: settings.get('ovh.endpoint'),
-				appKey: settings.get('ovh.appKey'),
-				appSecret: settings.get('ovh.appSecret'),
-				consumerKey: settings.get('ovh.consumerKey')
-			}),
-			(c) => new OvhClient(c)
+		github: routeGithub(
+			lazy(
+				'github',
+				() => settings.get('github.token'),
+				(t) => new GithubClient(t)
+			),
+			() =>
+				accounts.githubAccounts().map((a) => ({
+					owner: a.owner,
+					api: extraClient(`gh:${a.token}`, () => new GithubClient(a.token))
+				}))
 		),
-		npm: lazy('npm', () => ({ url: settings.get('npm.url'), identity: settings.get('npm.identity'), secret: settings.get('npm.secret') }), (c) => new NpmClient(c)),
+		ovh: routeOvh(
+			lazy(
+				'ovh',
+				() => ({
+					endpoint: settings.get('ovh.endpoint'),
+					appKey: settings.get('ovh.appKey'),
+					appSecret: settings.get('ovh.appSecret'),
+					consumerKey: settings.get('ovh.consumerKey')
+				}),
+				(c) => new OvhClient(c)
+			),
+			() =>
+				accounts.ovhAccounts().map((a) => ({
+					label: a.label,
+					api: extraClient(`ovh:${JSON.stringify(a.config)}`, () => new OvhClient(a.config))
+				}))
+		),
+		npm: lazy(
+			'npm',
+			() => ({
+				url: settings.get('npm.url'),
+				identity: settings.get('npm.identity'),
+				secret: settings.get('npm.secret')
+			}),
+			(c) => new NpmClient(c)
+		),
 		ssh: new SshClient(),
 		probe: new NetworkProbe(),
 		resolver: new DohResolver()
@@ -123,8 +163,9 @@ function build(): Forge {
 	const resources = new ResourceRepo(db);
 	const settings = new SettingsService(new SettingsRepo(db), cipher);
 
+	const accounts = new AccountService(new AccountRepo(db), cipher);
 	const redactor = new Redactor();
-	const refreshSecrets = () => redactor.add(...settings.secretValues());
+	const refreshSecrets = () => redactor.add(...settings.secretValues(), ...accounts.secretValues());
 	refreshSecrets();
 	settings.onChange(refreshSecrets);
 
@@ -138,14 +179,26 @@ function build(): Forge {
 	};
 	const guard = new WriteGuard(isDryRun, (s) => redactor.redact(s));
 
+	accounts.onChange(refreshSecrets);
 	const fake = config.mode === 'mock' ? createFakeApis() : null;
-	const apis = fake ? () => fake : liveApis(settings);
+	const apis = fake ? () => fake : liveApis(settings, accounts);
 
 	const lookup = {
-		forgeIps: () => projects.list().map((p) => p.ip).filter((x): x is string => !!x),
+		forgeIps: () =>
+			projects
+				.list()
+				.map((p) => p.ip)
+				.filter((x): x is string => !!x),
 		forgeRepos: () => projects.list().map((p) => `${p.repoOwner}/${p.repoName}`)
 	};
-	const deps = { apis, guard, settings, ownership: resources, projects: lookup };
+	const deps = {
+		apis,
+		guard,
+		settings,
+		ownership: resources,
+		projects: lookup,
+		githubOwners: () => [settings.get('github.owner'), ...accounts.githubOwners()]
+	};
 
 	const services: ForgeServices = {
 		config,
@@ -162,6 +215,7 @@ function build(): Forge {
 			const p = projects.list().find((x) => x.ip === ip);
 			if (p && !p.sshHostKey) projects.update(p.id, { sshHostKey: fp });
 		}),
+		githubOwners: deps.githubOwners,
 		probe: () => apis().probe,
 		resolver: () => apis().resolver,
 		repos: { projects, domains, jobs, resources }
@@ -172,7 +226,11 @@ function build(): Forge {
 		seedMockDatabase(services, db);
 		if (!settings.has('ssh.privateKey')) {
 			const kp = generateForgeKeyPair('forge-demo');
-			settings.set({ 'ssh.privateKey': kp.privateKey, 'ssh.publicKey': kp.publicKey, 'letsencrypt.email': 'bastien@bastiengrnt.fr' });
+			settings.set({
+				'ssh.privateKey': kp.privateKey,
+				'ssh.publicKey': kp.publicKey,
+				'letsencrypt.email': 'bastien@bastiengrnt.fr'
+			});
 		}
 	}
 
@@ -180,7 +238,10 @@ function build(): Forge {
 		// Clé SSH générée au premier démarrage : bootstrap.sh la lit (updates/forge.pub) pour le template 900.
 		if (!settings.has('ssh.privateKey')) {
 			const kp = generateForgeKeyPair('forge');
-			settings.set({ 'ssh.privateKey': kp.privateKey, 'ssh.publicKey': kp.publicKey });
+			settings.set({
+				'ssh.privateKey': kp.privateKey,
+				'ssh.publicKey': kp.publicKey
+			});
 			console.log('[forge] Clé SSH générée (Réglages → Clé SSH).');
 		}
 		const publish = () => void exportPublicKey(config.updatesDir, settings.get('ssh.publicKey')).catch((err) => console.warn(`[forge] forge.pub : ${err}`));
@@ -196,13 +257,24 @@ function build(): Forge {
 	}
 
 	const engine = new JobEngine(services);
-	const auth = new AuthService(new AuthRepo(db), { exposeSetupToken: config.mode === 'mock' });
+	const auth = new AuthService(new AuthRepo(db), {
+		exposeSetupToken: config.mode === 'mock'
+	});
 	if (auth.needsSetup()) auth.setupToken();
+	else if (config.adminReset) {
+		const token = auth.issueAdminResetFromHost();
+		if (token)
+			console.log(
+				`\n[forge] ━━ Réinitialisation du mot de passe admin ━━\n[forge] Ouvrez /reset/${token} (valable 30 min, une seule fois).\n[forge] Retirez ensuite FORGE_ADMIN_RESET du .env.\n`
+			);
+	}
 
 	const forge: Forge = {
 		...services,
 		engine,
 		auth,
+		audit: new AuditRepo(db),
+		accounts,
 		dashboard: new DashboardService(services),
 		wizard: new WizardService(services),
 		projects: new ProjectService(services, engine),

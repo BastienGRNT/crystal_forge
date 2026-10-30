@@ -16,6 +16,7 @@ import {
 	assertCanModifyCt,
 	assertForgeSecretName,
 	assertForgeVariableName,
+	assertForgeEnvironment,
 	assertGithubRepoAllowed,
 	assertOwned,
 	assertSafeCommand,
@@ -58,6 +59,8 @@ interface Deps {
 	settings: SettingsService;
 	ownership: OwnershipStore;
 	projects: ForgeProjectsLookup;
+	/** Propriétaires GitHub autorisés : le compte principal + les comptes supplémentaires. */
+	githubOwners: () => string[];
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -342,7 +345,7 @@ export class GithubGateway {
 	}
 
 	#assertRepo(owner: string, repo: string) {
-		assertGithubRepoAllowed(owner, repo, this.d.settings.get('github.owner'), this.d.projects.forgeRepos());
+		assertGithubRepoAllowed(owner, repo, this.d.githubOwners(), this.d.projects.forgeRepos());
 	}
 
 	createRegistrationToken(owner: string, repo: string) {
@@ -370,61 +373,81 @@ export class GithubGateway {
 		});
 	}
 
-	async putEnvSecret(owner: string, repo: string, envText: string): Promise<void> {
+	/** Crée le GitHub Environment du serveur de dev (aucune règle de protection). */
+	ensureEnvironment(owner: string, repo: string, environment: string) {
+		return this.d.guard.run({
+			system: 'github',
+			action: 'environment.ensure',
+			summary: `Créer l'environnement GitHub « ${environment} » sur ${owner}/${repo}`,
+			check: () => {
+				this.#assertRepo(owner, repo);
+				assertForgeEnvironment(environment);
+			},
+			execute: () => this.api.ensureEnvironment(owner, repo, environment),
+			simulate: () => undefined
+		});
+	}
+
+	async putEnvSecret(owner: string, repo: string, envText: string, environment?: string): Promise<void> {
 		this.#assertRepo(owner, repo);
-		const key = await this.api.getPublicKey(owner, repo);
+		assertForgeEnvironment(environment);
+		const key = await this.api.getPublicKey(owner, repo, environment);
 		const sealed = await sealForGithub(key.key, envText);
 		await this.d.guard.run({
 			system: 'github',
 			action: 'secret.put',
-			summary: `Écrire le secret ${FORGE_SECRET_NAME} de ${owner}/${repo} (${new TextEncoder().encode(envText).length} octets, chiffré libsodium)`,
+			summary: `Écrire le secret ${FORGE_SECRET_NAME} de ${owner}/${repo}${environment ? ` (environnement ${environment})` : ''} (${new TextEncoder().encode(envText).length} octets, chiffré libsodium)`,
 			check: () => {
 				this.#assertRepo(owner, repo);
 				assertForgeSecretName(FORGE_SECRET_NAME);
+				assertForgeEnvironment(environment);
 			},
-			execute: () => this.api.putSecret(owner, repo, FORGE_SECRET_NAME, sealed, key.keyId),
+			execute: () => this.api.putSecret(owner, repo, FORGE_SECRET_NAME, sealed, key.keyId, environment),
 			simulate: () => undefined
 		});
 	}
 
-	deleteEnvSecret(owner: string, repo: string) {
+	deleteEnvSecret(owner: string, repo: string, environment?: string) {
 		return this.d.guard.run({
 			system: 'github',
 			action: 'secret.delete',
-			summary: `Supprimer le secret ${FORGE_SECRET_NAME} de ${owner}/${repo}`,
+			summary: `Supprimer le secret ${FORGE_SECRET_NAME} de ${owner}/${repo}${environment ? ` (environnement ${environment})` : ''}`,
 			check: () => {
 				this.#assertRepo(owner, repo);
-				assertOwned('gh_secret', `${owner}/${repo}:${FORGE_SECRET_NAME}`, this.d.ownership.owned('gh_secret'), 'Le secret');
+				assertForgeEnvironment(environment);
+				assertOwned('gh_secret', `${owner}/${repo}:${environment ? `${environment}:` : ''}${FORGE_SECRET_NAME}`, this.d.ownership.owned('gh_secret'), 'Le secret');
 			},
-			execute: () => this.api.deleteSecret(owner, repo, FORGE_SECRET_NAME),
+			execute: () => this.api.deleteSecret(owner, repo, FORGE_SECRET_NAME, environment),
 			simulate: () => undefined
 		});
 	}
 
-	setVariable(owner: string, repo: string, name: string, value: string) {
+	setVariable(owner: string, repo: string, name: string, value: string, environment?: string) {
 		return this.d.guard.run({
 			system: 'github',
 			action: 'variable.set',
-			summary: `Variable ${name} = « ${value} » sur ${owner}/${repo}`,
+			summary: `Variable ${name} = « ${value} » sur ${owner}/${repo}${environment ? ` (environnement ${environment})` : ''}`,
 			check: () => {
 				this.#assertRepo(owner, repo);
 				assertForgeVariableName(name);
+				assertForgeEnvironment(environment);
 			},
-			execute: () => this.api.setVariable(owner, repo, name, value),
+			execute: () => this.api.setVariable(owner, repo, name, value, environment),
 			simulate: () => 'created' as const
 		});
 	}
 
-	deleteVariable(owner: string, repo: string, name: string) {
+	deleteVariable(owner: string, repo: string, name: string, environment?: string) {
 		return this.d.guard.run({
 			system: 'github',
 			action: 'variable.delete',
-			summary: `Supprimer la variable ${name} de ${owner}/${repo}`,
+			summary: `Supprimer la variable ${name} de ${owner}/${repo}${environment ? ` (environnement ${environment})` : ''}`,
 			check: () => {
 				this.#assertRepo(owner, repo);
 				assertForgeVariableName(name);
+				assertForgeEnvironment(environment);
 			},
-			execute: () => this.api.deleteVariable(owner, repo, name),
+			execute: () => this.api.deleteVariable(owner, repo, name, environment),
 			simulate: () => undefined
 		});
 	}
@@ -602,7 +625,7 @@ export class ProxyGateway {
 	}
 
 	/** `certificateId` : certificat Let's Encrypt créé par Forge à réutiliser (sinon, nouvelle demande). */
-	async createProxyHost(input: { domain: string; forwardHost: string; forwardPort: number; email: string; certificateId?: number }): Promise<NpmProxyHost> {
+	async createProxyHost(input: { domain: string; forwardHost: string; forwardPort: number; email: string; certificateId?: number; accessListId?: number }): Promise<NpmProxyHost> {
 		const payload: NpmCreateProxyHost = {
 			domain_names: [input.domain],
 			forward_scheme: 'http',
@@ -615,7 +638,7 @@ export class ProxyGateway {
 			allow_websocket_upgrade: true,
 			hsts_enabled: false,
 			caching_enabled: false,
-			access_list_id: 0,
+			access_list_id: input.accessListId ?? 0,
 			advanced_config: '',
 			enabled: true,
 			locations: [],
@@ -626,6 +649,7 @@ export class ProxyGateway {
 			action: 'proxy-host.create',
 			summary: `Créer le proxy host ${input.domain} → http://${input.forwardHost}:${input.forwardPort} (${input.certificateId ? `certificat #${input.certificateId} réutilisé` : "Let's Encrypt"}, SSL forcé, HTTP/2, websockets)`,
 			check: async () => {
+				if (input.accessListId && input.accessListId > 0) assertOwned('npm_access_list', input.accessListId, this.d.ownership.owned('npm_access_list'), "La liste d'accès");
 				if (input.certificateId) assertOwned('npm_certificate', input.certificateId, this.d.ownership.owned('npm_certificate'), 'Le certificat');
 				const hosts = await this.api.listProxyHosts();
 				assertCanCreateProxyHost(
@@ -686,6 +710,28 @@ export class ProxyGateway {
 			summary: `Supprimer le proxy host #${id}`,
 			check: () => assertOwned('npm_proxy_host', id, this.d.ownership.owned('npm_proxy_host'), 'Le proxy host'),
 			execute: () => this.api.deleteProxyHost(id),
+			simulate: () => undefined
+		});
+	}
+
+	createAccessList(name: string, username: string, password: string): Promise<{ id: number }> {
+		return this.#run({
+			system: 'npm',
+			action: 'access-list.create',
+			summary: `Créer la liste d'accès « ${name} » (utilisateur ${username})`,
+			check: () => undefined,
+			execute: () => this.api.createAccessList(name, username, password),
+			simulate: () => ({ id: -Date.now() })
+		});
+	}
+
+	deleteAccessList(id: number) {
+		return this.#run({
+			system: 'npm',
+			action: 'access-list.delete',
+			summary: `Supprimer la liste d'accès #${id}`,
+			check: () => assertOwned('npm_access_list', id, this.d.ownership.owned('npm_access_list'), "La liste d'accès"),
+			execute: () => this.api.deleteAccessList(id),
 			simulate: () => undefined
 		});
 	}

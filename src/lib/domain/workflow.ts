@@ -2,9 +2,11 @@ import { parse as parseYaml } from 'yaml';
 import type { DeployMode } from './compose-detect';
 import { isSqlDbKind } from './compose-analysis';
 import { workflowBackupScript } from './database';
+import { type Environment } from './environments';
 
 export const WORKFLOW_PATH = '.github/workflows/forge-deploy.yml';
 export const WORKFLOW_FILE = 'forge-deploy.yml';
+const DEV_WORKFLOW_FILE = 'forge-deploy-dev.yml';
 /**
  * Version du workflow généré. À incrémenter à chaque changement du modèle :
  * « Mettre à niveau le projet » propose alors la nouvelle version aux projets existants.
@@ -22,6 +24,8 @@ export interface WorkflowOptions {
 	branch: string;
 	mode: DeployMode;
 	ctid?: number | null;
+	/** development : job rattaché à l'environnement GitHub « development » (secret et variables propres). */
+	environment?: Environment;
 }
 
 /** Variables de dépôt (non secrètes) lues par le workflow. */
@@ -109,7 +113,7 @@ export function generateWorkflow(opts: WorkflowOptions): string {
 # Si FORGE_DB_SERVICE est défini, la base est sauvegardée avant chaque
 # déploiement dans /home/github/forge-backups (10 dernières conservées).
 # ──────────────────────────────────────────────────────────────────────
-name: Forge · Déploiement
+name: Forge · Déploiement${opts.environment === 'development' ? ' (dev)' : ''}
 
 on:
   push:
@@ -127,7 +131,7 @@ jobs:
   deploy:
     name: Déployer ${slug}
     runs-on: [self-hosted, ${slug}]
-    timeout-minutes: 30
+    timeout-minutes: 30${opts.environment === 'development' ? '\n    environment: development' : ''}
     env:
       FORGE_COMPOSE_FILE: \${{ vars.FORGE_COMPOSE_FILE }}
       FORGE_WORKDIR: \${{ vars.FORGE_WORKDIR }}
@@ -216,7 +220,7 @@ export interface SelfHostedUsage {
 export function findSelfHostedWorkflows(files: { path: string; content: string }[]): SelfHostedUsage[] {
 	const out: SelfHostedUsage[] = [];
 	for (const f of files) {
-		if (f.path.endsWith(WORKFLOW_FILE)) continue;
+		if (f.path.endsWith(WORKFLOW_FILE) || f.path.endsWith(DEV_WORKFLOW_FILE)) continue;
 		let doc: unknown;
 		try {
 			doc = parseYaml(f.content);

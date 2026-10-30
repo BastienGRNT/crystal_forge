@@ -6,6 +6,7 @@ declare global {
 		}
 		interface Locals {
 			authenticated: boolean;
+			user: import('$server/application/use-cases/auth').SessionUser | null;
 			clientIp: string;
 		}
 	}

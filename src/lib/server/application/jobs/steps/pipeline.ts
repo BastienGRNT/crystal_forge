@@ -1,5 +1,5 @@
 /** Étape 7 — Premier pipeline : run GitHub Actions suivi jusqu'au bout, puis check HTTPS. */
-import { WORKFLOW_FILE } from '$lib/domain/workflow';
+import { workflowFileFor } from '$lib/domain/environments';
 import type { GhRun } from '../../ports';
 import type { StepContext, StepDefinition } from '../types';
 import { fmtDuration } from './common';
@@ -22,7 +22,7 @@ async function findOrStartRun(ctx: StepContext): Promise<number | null> {
 	if (commitSha && !ctx.params.forceDispatch && !ctx.dryRun) {
 		ctx.log('info', `Recherche du run déclenché par le commit ${commitSha.slice(0, 7)}…`);
 		for (let i = 0; i < 6; i++) {
-			const runs = await github.api.listWorkflowRuns(p.repoOwner, p.repoName, WORKFLOW_FILE, 10);
+			const runs = await github.api.listWorkflowRuns(p.repoOwner, p.repoName, workflowFileFor(p.environment), 10);
 			const run = runs.find((r) => r.headSha === commitSha);
 			if (run) {
 				ctx.log('info', `Run #${run.runNumber} déjà déclenché par le commit du workflow : suivi de ce run.`);
@@ -34,13 +34,13 @@ async function findOrStartRun(ctx: StepContext): Promise<number | null> {
 
 	if (commitSha && !ctx.params.forceDispatch && !ctx.dryRun) ctx.log('info', 'Aucun run lié au commit : lancement manuel (workflow_dispatch).');
 	const t0 = Date.now();
-	const res = await github.dispatch(p.repoOwner, p.repoName, WORKFLOW_FILE, p.branch);
+	const res = await github.dispatch(p.repoOwner, p.repoName, workflowFileFor(p.environment), p.branch);
 	if (ctx.dryRun) return null;
 	if (res.runId) return res.runId;
 	// Repli si l'API ne renvoie pas l'ID : le run le plus récent créé après le dispatch.
 	for (let i = 0; i < 10; i++) {
 		await ctx.sleep(3000);
-		const runs = await github.api.listWorkflowRuns(p.repoOwner, p.repoName, WORKFLOW_FILE, 5);
+		const runs = await github.api.listWorkflowRuns(p.repoOwner, p.repoName, workflowFileFor(p.environment), 5);
 		const run = runs.find((r) => r.event === 'workflow_dispatch' && Date.parse(r.createdAt) >= t0 - 5000);
 		if (run) return run.id;
 	}

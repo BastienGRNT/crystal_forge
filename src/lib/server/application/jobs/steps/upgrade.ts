@@ -1,5 +1,6 @@
 /** Étapes de maintenance : taille du CT, mise à niveau du workflow, mises à jour de sécurité. */
-import { generateWorkflow, WORKFLOW_PATH, workflowVersion, WORKFLOW_VERSION } from '$lib/domain/workflow';
+import { workflowPathFor } from '$lib/domain/environments';
+import { generateWorkflow, workflowVersion, WORKFLOW_VERSION } from '$lib/domain/workflow';
 import type { StepDefinition } from '../types';
 import { requireIp, sizeOf } from './common';
 
@@ -33,10 +34,11 @@ export const upgradeWorkflowStep: StepDefinition = {
 	async run(ctx) {
 		const { github, repos } = ctx.services;
 		const p = ctx.project();
+		const WORKFLOW_PATH = workflowPathFor(p.environment);
 		const id = `${p.repoOwner}/${p.repoName}:${WORKFLOW_PATH}`;
 		const current = await github.api.getFile(p.repoOwner, p.repoName, WORKFLOW_PATH, p.branch);
 		if (!current) throw new Error(`${WORKFLOW_PATH} est absent de ${p.branch}.`);
-		const expected = generateWorkflow({ slug: p.slug, branch: p.branch, mode: p.deployMode, ctid: p.ctid });
+		const expected = generateWorkflow({ slug: p.slug, branch: p.branch, mode: p.deployMode, ctid: p.ctid, environment: p.environment });
 		if (current.content === expected) {
 			ctx.log('info', 'Workflow déjà à jour.');
 			return;

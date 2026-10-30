@@ -11,15 +11,16 @@ function safeNext(next: string | null): string {
 
 export const load: PageServerLoad = ({ locals, url }) => {
 	if (locals.authenticated) redirect(303, safeNext(url.searchParams.get('next')));
-	return { justSetUp: url.searchParams.has('setup'), mode: forge().config.mode };
+	return { justSetUp: url.searchParams.has('setup'), justReset: url.searchParams.has('reset'), mode: forge().config.mode };
 };
 
 export const actions: Actions = {
 	default: async ({ request, cookies, locals, url }) => {
 		const data = await request.formData();
+		const username = String(data.get('username') ?? '');
 		const password = String(data.get('password') ?? '');
 		try {
-			const { token, expiresAt } = await forge().auth.login(password, locals.clientIp, request.headers.get('user-agent'));
+			const { token, expiresAt } = await forge().auth.login(username, password, locals.clientIp, request.headers.get('user-agent'));
 			cookies.set(SESSION_COOKIE, token, {
 				path: '/',
 				httpOnly: true,

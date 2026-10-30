@@ -134,4 +134,13 @@ export class NpmClient implements NpmApi {
 	async deleteCertificate(id: number) {
 		await this.#call('DELETE', `/nginx/certificates/${id}`);
 	}
+
+	async createAccessList(name: string, username: string, password: string) {
+		const r = await this.#call<{ id: number }>('POST', '/nginx/access-lists', { name, satisfy_any: false, pass_auth: false, items: [{ username, password }], clients: [] });
+		return { id: r.id };
+	}
+
+	async deleteAccessList(id: number) {
+		await this.#call('DELETE', `/nginx/access-lists/${id}`);
+	}
 }

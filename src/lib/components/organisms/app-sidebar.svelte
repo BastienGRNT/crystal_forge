@@ -6,6 +6,8 @@
 	import ListChecks from '@lucide/svelte/icons/list-checks';
 	import Settings from '@lucide/svelte/icons/settings';
 	import HeartPulse from '@lucide/svelte/icons/heart-pulse';
+	import Users from '@lucide/svelte/icons/users';
+	import UserRound from '@lucide/svelte/icons/user-round';
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import Sun from '@lucide/svelte/icons/sun';
 	import Moon from '@lucide/svelte/icons/moon';
@@ -23,31 +25,40 @@
 		projects,
 		activeJobs,
 		host,
+		user,
 		onNavigate
 	}: {
+		user: { username: string; role: 'admin' | 'collaborator' };
 		projects: { slug: string; name: string; status: string }[];
 		activeJobs: number;
 		host: { memUsed: number; memTotal: number; cpu: number } | null;
 		onNavigate?: () => void;
 	} = $props();
 
-	const nav = [
-		{ href: '/', label: 'Tableau de bord', icon: LayoutDashboard, exact: true },
-		{ href: '/projects', label: 'Projets', icon: Boxes, exact: true },
-		{ href: '/jobs', label: 'Jobs', icon: ListChecks, exact: false },
-		{ href: '/server', label: 'Santé du serveur', icon: HeartPulse, exact: false },
-		{ href: '/settings', label: 'Réglages', icon: Settings, exact: false }
-	];
+	const isAdmin = $derived(user.role === 'admin');
+	// Masquer un lien n'est qu'un confort : les droits sont vérifiés côté serveur (hooks.server.ts).
+	const nav = $derived(
+		[
+			{ href: '/', label: 'Tableau de bord', icon: LayoutDashboard, exact: true, admin: true },
+			{ href: '/projects', label: 'Projets', icon: Boxes, exact: true, admin: false },
+			{ href: '/jobs', label: 'Jobs', icon: ListChecks, exact: false, admin: false },
+			{ href: '/server', label: 'Santé du serveur', icon: HeartPulse, exact: false, admin: true },
+			{ href: '/users', label: 'Utilisateurs', icon: Users, exact: false, admin: true },
+			{ href: '/settings', label: 'Réglages', icon: Settings, exact: false, admin: true }
+		].filter((i) => isAdmin || !i.admin)
+	);
 	const isActive = (href: string, exact: boolean) => (exact ? page.url.pathname === href : page.url.pathname.startsWith(href));
 </script>
 
 <div class="flex h-full flex-col gap-4 p-3">
-	<a href="/" class="flex h-10 items-center px-2" onclick={onNavigate}><Logo /></a>
+	<a href={isAdmin ? '/' : '/projects'} class="flex h-10 items-center px-2" onclick={onNavigate}><Logo /></a>
 
-	<Button href="/projects/new" class="mx-1 justify-start gap-2 bg-ember text-ember-foreground hover:bg-ember/90" onclick={onNavigate}>
-		<Plus />
-		Nouveau projet
-	</Button>
+	{#if isAdmin}
+		<Button href="/projects/new" class="mx-1 justify-start gap-2 bg-ember text-ember-foreground hover:bg-ember/90" onclick={onNavigate}>
+			<Plus />
+			Nouveau projet
+		</Button>
+	{/if}
 
 	<nav class="flex flex-col gap-0.5" aria-label="Navigation principale">
 		{#each nav as item (item.href)}
@@ -108,7 +119,8 @@
 				<Sun class="hidden dark:block" />
 				<Moon class="dark:hidden" />
 			</Button>
-			<form method="POST" action="/logout" class="ml-auto">
+			<Button href="/account" variant="ghost" size="sm" class="ml-auto min-w-0 text-muted-foreground" onclick={onNavigate} title="Mon compte"><UserRound /> <span class="truncate">{user.username}</span></Button>
+			<form method="POST" action="/logout">
 				<Button type="submit" variant="ghost" size="sm" class="text-muted-foreground"><LogOut /> Déconnexion</Button>
 			</form>
 		</div>

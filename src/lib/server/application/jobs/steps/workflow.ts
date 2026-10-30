@@ -1,5 +1,6 @@
 /** Étape 4 — Workflow forge-deploy.yml (confirmation explicite avant le commit). */
-import { findSelfHostedWorkflows, generateWorkflow, WORKFLOW_PATH } from '$lib/domain/workflow';
+import { workflowPathFor } from '$lib/domain/environments';
+import { findSelfHostedWorkflows, generateWorkflow } from '$lib/domain/workflow';
 import type { StepDefinition } from '../types';
 
 export const workflowStep: StepDefinition = {
@@ -8,6 +9,7 @@ export const workflowStep: StepDefinition = {
 	async run(ctx) {
 		const { github } = ctx.services;
 		const p = ctx.project();
+		const WORKFLOW_PATH = workflowPathFor(p.environment);
 
 		const existing = await github.api.getFile(p.repoOwner, p.repoName, WORKFLOW_PATH, p.branch);
 		if (existing) {
@@ -21,7 +23,7 @@ export const workflowStep: StepDefinition = {
 			return;
 		}
 
-		const content = generateWorkflow({ slug: p.slug, branch: p.branch, mode: p.deployMode, ctid: p.ctid });
+		const content = generateWorkflow({ slug: p.slug, branch: p.branch, mode: p.deployMode, ctid: p.ctid, environment: p.environment });
 
 		// Détection des autres workflows self-hosted (risque de double déploiement).
 		const entries = await github.api.listDir(p.repoOwner, p.repoName, '.github/workflows', p.branch);

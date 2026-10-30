@@ -12,10 +12,10 @@ export const load: PageServerLoad = ({ params }) => {
 
 export const actions: Actions = {
 	/** Affichage en clair du .env : seulement après re-saisie du mot de passe admin. */
-	reveal: async ({ params, request }) => {
+	reveal: async ({ params, request, locals }) => {
 		const f = forge();
 		const password = String((await request.formData()).get('password') ?? '');
-		if (!(await f.auth.verifyCurrentPassword(password))) return fail(403, { revealError: 'Mot de passe incorrect.' });
+		if (!(await f.auth.verifyPassword(locals.user!.id, password))) return fail(403, { revealError: 'Mot de passe incorrect.' });
 		return { revealed: f.projects.revealEnv(f.projects.get(params.slug)) };
 	},
 	save: async ({ params, request }) => {

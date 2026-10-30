@@ -602,7 +602,18 @@ class FakeGithub implements GithubApi {
 		return lines.join('\n');
 	}
 
-	async getPublicKey(owner: string, name: string) {
+	/** Mock : les secrets/variables d'un environnement vivent dans les mêmes tables, préfixés « env/ ». */
+	#scoped(environment?: string) {
+		const prefix = environment ? `${environment}/` : '';
+		return { key: (n: string) => prefix + n, own: (n: string) => (environment ? n.startsWith(prefix) : !n.includes('/')), strip: (n: string) => n.slice(prefix.length) };
+	}
+
+	async ensureEnvironment(owner: string, name: string) {
+		await delay(40, 120);
+		repoOf(owner, name);
+	}
+
+	async getPublicKey(owner: string, name: string, _environment?: string) {
 		await delay();
 		repoOf(owner, name);
 		const w = world();
@@ -610,9 +621,10 @@ class FakeGithub implements GithubApi {
 		return { keyId: '3380204578043523366', key: w.ghKeyPair.publicKey };
 	}
 
-	async listVariables(owner: string, name: string) {
+	async listVariables(owner: string, name: string, environment?: string) {
 		await delay();
-		return [...repoOf(owner, name).variables.entries()].map(([n, value]) => ({ name: n, value }));
+		const sc = this.#scoped(environment);
+		return [...repoOf(owner, name).variables.entries()].filter(([n]) => sc.own(n)).map(([n, value]) => ({ name: sc.strip(n), value }));
 	}
 
 	async latestCommit(owner: string, name: string, branch: string) {
@@ -642,27 +654,28 @@ class FakeGithub implements GithubApi {
 		r.runners = r.runners.filter((x) => x.id !== runnerId);
 	}
 
-	async putSecret(owner: string, name: string, secret: string) {
+	async putSecret(owner: string, name: string, secret: string, _enc?: string, _keyId?: string, environment?: string) {
 		await delay();
-		repoOf(owner, name).secrets.set(secret, Date.now());
+		repoOf(owner, name).secrets.set(this.#scoped(environment).key(secret), Date.now());
 	}
 
-	async deleteSecret(owner: string, name: string, secret: string) {
+	async deleteSecret(owner: string, name: string, secret: string, environment?: string) {
 		await delay();
-		repoOf(owner, name).secrets.delete(secret);
+		repoOf(owner, name).secrets.delete(this.#scoped(environment).key(secret));
 	}
 
-	async setVariable(owner: string, name: string, variable: string, value: string) {
+	async setVariable(owner: string, name: string, variable: string, value: string, environment?: string) {
 		await delay(40, 120);
 		const r = repoOf(owner, name);
-		const existed = r.variables.has(variable);
-		r.variables.set(variable, value);
+		const key = this.#scoped(environment).key(variable);
+		const existed = r.variables.has(key);
+		r.variables.set(key, value);
 		return existed ? ('updated' as const) : ('created' as const);
 	}
 
-	async deleteVariable(owner: string, name: string, variable: string) {
+	async deleteVariable(owner: string, name: string, variable: string, environment?: string) {
 		await delay(40, 120);
-		repoOf(owner, name).variables.delete(variable);
+		repoOf(owner, name).variables.delete(this.#scoped(environment).key(variable));
 	}
 
 	#newRun(r: FakeRepo, event: string, message: string): FakeRun {
@@ -897,6 +910,15 @@ class FakeNpm implements NpmApi {
 		await delay();
 		const w = world();
 		w.npmCerts = w.npmCerts.filter((c) => c.id !== id);
+	}
+
+	async createAccessList(_name: string, _username: string, _password: string) {
+		await delay();
+		return { id: world().nextNpmId++ };
+	}
+
+	async deleteAccessList(_id: number) {
+		await delay();
 	}
 }
 

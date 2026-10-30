@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 const now = sql`(unixepoch() * 1000)`;
 const timestamps = {
@@ -16,6 +16,8 @@ export const projects = sqliteTable(
 		repoOwner: text('repo_owner').notNull(),
 		repoName: text('repo_name').notNull(),
 		branch: text('branch').notNull().default('main'),
+		/** production : branche main, slug du dépôt ; development : autre branche, slug « <slug>-dev », accès protégé dans NPM. */
+		environment: text('environment', { enum: ['production', 'development'] }).notNull().default('production'),
 		workdir: text('workdir').notNull().default('.'),
 		deployMode: text('deploy_mode', { enum: ['compose', 'dockerfile'] }).notNull(),
 		composeFile: text('compose_file'),
@@ -136,7 +138,7 @@ export const resources = sqliteTable(
 		projectId: integer('project_id').references(() => projects.id),
 		jobId: integer('job_id').references(() => jobs.id),
 		type: text('type', {
-			enum: ['pve_ct', 'ovh_record', 'npm_proxy_host', 'npm_certificate', 'gh_runner', 'gh_secret', 'gh_variable', 'gh_workflow']
+			enum: ['pve_ct', 'ovh_record', 'npm_proxy_host', 'npm_certificate', 'npm_access_list', 'gh_runner', 'gh_secret', 'gh_variable', 'gh_workflow']
 		}).notNull(),
 		externalId: text('external_id').notNull(),
 		meta: text('meta').notNull().default('{}'),
@@ -159,9 +161,85 @@ export const admin = sqliteTable('admin', {
 	updatedAt: integer('updated_at').notNull().default(now)
 });
 
+/** Comptes Forge : un admin (tout) et des collaborateurs (projets assignés seulement). */
+export const users = sqliteTable(
+	'users',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		username: text('username').notNull(),
+		passwordHash: text('password_hash').notNull(),
+		role: text('role', { enum: ['admin', 'collaborator'] }).notNull().default('collaborator'),
+		disabled: integer('disabled', { mode: 'boolean' }).notNull().default(false),
+		...timestamps
+	},
+	(t) => [uniqueIndex('users_username_idx').on(t.username)]
+);
+
+/** Niveau d'accès d'un collaborateur sur un projet : read < deploy < edit. */
+export const projectMembers = sqliteTable(
+	'project_members',
+	{
+		userId: integer('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+		projectId: integer('project_id')
+			.notNull()
+			.references(() => projects.id, { onDelete: 'cascade' }),
+		level: text('level', { enum: ['read', 'deploy', 'edit'] }).notNull(),
+		createdAt: integer('created_at').notNull().default(now)
+	},
+	(t) => [primaryKey({ columns: [t.userId, t.projectId] })]
+);
+
+/** Liens de réinitialisation de mot de passe, à usage unique (seul le SHA-256 du jeton est stocké). */
+export const passwordResets = sqliteTable('password_resets', {
+	id: text('id').primaryKey(),
+	userId: integer('user_id')
+		.notNull()
+		.references(() => users.id, { onDelete: 'cascade' }),
+	expiresAt: integer('expires_at').notNull(),
+	createdAt: integer('created_at').notNull().default(now)
+});
+
+/** Journal des actions (écritures) faites dans l'interface, avec leur auteur. */
+export const auditLog = sqliteTable(
+	'audit_log',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		ts: integer('ts').notNull().default(now),
+		userId: integer('user_id'),
+		username: text('username').notNull(),
+		method: text('method').notNull(),
+		path: text('path').notNull(),
+		status: integer('status').notNull(),
+		ip: text('ip')
+	},
+	(t) => [index('audit_log_ts_idx').on(t.ts)]
+);
+
+/**
+ * Comptes GitHub et OVH supplémentaires (le compte « par défaut » reste dans les réglages).
+ * Un compte GitHub est choisi d'après le propriétaire du dépôt, un compte OVH d'après la zone.
+ */
+export const accounts = sqliteTable(
+	'accounts',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		kind: text('kind', { enum: ['github', 'ovh'] }).notNull(),
+		label: text('label').notNull(),
+		/** GitHub : login du propriétaire des dépôts (sert à choisir le compte). */
+		owner: text('owner'),
+		/** JSON chiffré (AES-256-GCM) : jeton GitHub, ou clés OVH. */
+		config: text('config').notNull(),
+		...timestamps
+	},
+	(t) => [uniqueIndex('accounts_kind_label_idx').on(t.kind, t.label)]
+);
+
 export const sessions = sqliteTable('sessions', {
 	/** SHA-256 du jeton de session (le jeton lui-même n'est jamais stocké). */
 	id: text('id').primaryKey(),
+	userId: integer('user_id'),
 	expiresAt: integer('expires_at').notNull(),
 	createdAt: integer('created_at').notNull().default(now),
 	ip: text('ip'),
@@ -169,6 +247,9 @@ export const sessions = sqliteTable('sessions', {
 });
 
 export type ProjectRow = typeof projects.$inferSelect;
+export type UserRow = typeof users.$inferSelect;
+export type MemberRow = typeof projectMembers.$inferSelect;
+export type AccountRow = typeof accounts.$inferSelect;
 export type DomainRow = typeof domains.$inferSelect;
 export type JobRow = typeof jobs.$inferSelect;
 export type JobStepRow = typeof jobSteps.$inferSelect;

@@ -34,6 +34,7 @@
 						<div class="flex flex-wrap items-center gap-2">
 							<span class="font-medium">{p.name}</span>
 							<StatusBadge status={p.status} />
+							<Badge variant={p.environment === 'development' ? 'outline' : 'secondary'}>{p.environment === 'development' ? 'DEV' : 'PROD'}</Badge>
 							<Badge variant="secondary" class="font-mono">{p.deployMode === 'compose' ? 'compose' : 'dockerfile'}</Badge>
 						</div>
 						<div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">

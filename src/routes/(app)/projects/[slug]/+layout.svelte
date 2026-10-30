@@ -13,6 +13,9 @@
 	import PageHeader from '$lib/components/molecules/page-header.svelte';
 	import StatusBadge from '$lib/components/molecules/status-badge.svelte';
 	import GithubIcon from '$lib/components/atoms/github-icon.svelte';
+	import Plus from '@lucide/svelte/icons/plus';
+	import { Badge } from '$lib/components/atoms/ui/badge';
+	import { Button } from '$lib/components/atoms/ui/button';
 	import Spinner from '$lib/components/atoms/spinner.svelte';
 	import { cn } from '$lib/utils';
 
@@ -44,6 +47,7 @@
 	{/snippet}
 	<div class="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 text-sm text-muted-foreground">
 		<StatusBadge status={p.status} />
+		<Badge variant={p.environment === 'development' ? 'outline' : 'secondary'}>{p.environment === 'development' ? 'DEV' : 'PROD'}</Badge>
 		<a href="https://github.com/{p.repoOwner}/{p.repoName}" target="_blank" rel="noreferrer" class="inline-flex items-center gap-1.5 font-mono text-xs hover:text-foreground">
 			<GithubIcon class="size-3.5" />
 			{p.repoOwner}/{p.repoName}@{p.branch}
@@ -54,6 +58,13 @@
 				{d.fqdn}<ExternalLink class="size-3" />
 			</a>
 		{/each}
+		{#if page.data.user?.role === 'admin'}
+			{#if data.sibling}
+				<a href="/projects/{data.sibling.slug}" class="text-xs underline hover:text-foreground">{data.sibling.environment === 'development' ? 'Serveur dev' : 'Serveur prod'} : {data.sibling.slug}</a>
+			{:else if p.environment === 'production'}
+				<Button href="/projects/new?from={p.slug}" variant="outline" size="sm"><Plus /> Ajouter un serveur dev</Button>
+			{/if}
+		{/if}
 	</div>
 </PageHeader>
 

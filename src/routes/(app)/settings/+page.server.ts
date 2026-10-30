@@ -24,6 +24,7 @@ export const load: PageServerLoad = async () => {
 		ovhTokenUrl: ovhCreateTokenUrl(f.settings.get('ovh.endpoint'), zoneList, true),
 		ovhTokenUrlNoDelete: ovhCreateTokenUrl(f.settings.get('ovh.endpoint'), zoneList, false),
 		audit: f.guard.recentAudit(30),
+		accounts: f.accounts.list(),
 		update: await f.selfUpdate.status().catch((err) => ({ error: errorMessage(err) }))
 	};
 };
@@ -49,6 +50,35 @@ function validate(values: Partial<Record<SettingKey, string>>) {
 }
 
 export const actions: Actions = {
+	addGithub: async ({ request }) => {
+		const f = forge();
+		const d = await request.formData();
+		const get = (k: string) => String(d.get(k) ?? '');
+		try {
+			f.accounts.addGithub({ label: get('label'), owner: get('owner'), token: get('token') }, f.settings.get('github.owner'));
+		} catch (err) {
+			return fail(400, { section: 'github', error: errorMessage(err) });
+		}
+		return { section: 'github', saved: true };
+	},
+	addOvh: async ({ request }) => {
+		const d = await request.formData();
+		const get = (k: string) => String(d.get(k) ?? '');
+		try {
+			forge().accounts.addOvh({ label: get('label'), endpoint: get('endpoint'), appKey: get('appKey'), appSecret: get('appSecret'), consumerKey: get('consumerKey') });
+		} catch (err) {
+			return fail(400, { section: 'ovh', error: errorMessage(err) });
+		}
+		return { section: 'ovh', saved: true };
+	},
+	removeAccount: async ({ request }) => {
+		try {
+			forge().accounts.remove(Number((await request.formData()).get('id')));
+		} catch (err) {
+			return fail(400, { section: 'accounts', error: errorMessage(err) });
+		}
+		return { section: 'accounts', saved: true };
+	},
 	save: async ({ request }) => {
 		const f = forge();
 		const d = await request.formData();
@@ -103,12 +133,12 @@ export const actions: Actions = {
 		}
 		return { reset: true };
 	},
-	password: async ({ request }) => {
+	password: async ({ request, locals }) => {
 		const d = await request.formData();
 		const next = String(d.get('next') ?? '');
 		if (next !== String(d.get('confirm') ?? '')) return fail(400, { section: 'account', error: 'Les deux mots de passe ne correspondent pas.' });
 		try {
-			await forge().auth.changePassword(String(d.get('current') ?? ''), next);
+			await forge().auth.changePassword(locals.user!.id, String(d.get('current') ?? ''), next);
 		} catch (err) {
 			return fail(400, { section: 'account', error: errorMessage(err) });
 		}

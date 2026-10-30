@@ -4,7 +4,8 @@
  * applique les éléments choisis via un job (avec confirmation pour le workflow).
  */
 import { errorMessage, UserFacingError } from '$lib/domain/errors';
-import { buildRepoVariables, generateWorkflow, WORKFLOW_PATH, workflowVersion, WORKFLOW_VERSION } from '$lib/domain/workflow';
+import { githubEnvironmentFor, workflowPathFor } from '$lib/domain/environments';
+import { buildRepoVariables, generateWorkflow, workflowVersion, WORKFLOW_VERSION } from '$lib/domain/workflow';
 import { lineDiff, type DiffLine } from '$lib/domain/diff';
 import type { ProjectRow } from '$server/infrastructure/db/schema';
 import { ReadCommand } from '../gateways';
@@ -45,8 +46,9 @@ export class UpgradeService {
 
 		return Promise.all([
 			safe('workflow', 'Workflow de déploiement', async () => {
+				const WORKFLOW_PATH = workflowPathFor(p.environment);
 				const current = await github.api.getFile(p.repoOwner, p.repoName, WORKFLOW_PATH, p.branch);
-				const expected = generateWorkflow({ slug: p.slug, branch: p.branch, mode: p.deployMode, ctid: p.ctid });
+				const expected = generateWorkflow({ slug: p.slug, branch: p.branch, mode: p.deployMode, ctid: p.ctid, environment: p.environment });
 				if (!current) return { status: 'blocked', detail: `${WORKFLOW_PATH} est absent de ${p.branch}.` };
 				const v = workflowVersion(current.content);
 				if (current.content === expected) return { status: 'ok', detail: `Version ${v ?? '?'} (la plus récente).` };
@@ -65,7 +67,7 @@ export class UpgradeService {
 			}),
 			safe('variables', 'Variables FORGE_* du dépôt', async () => {
 				const expected = buildRepoVariables({ mode: p.deployMode, composeFile: p.composeFile, workdir: p.workdir, postDeploy: p.postDeploy, appService: p.appService, appPort: p.appPort, dbService: p.dbService, dbKind: p.dbKind });
-				const current = new Map((await github.api.listVariables(p.repoOwner, p.repoName)).map((v) => [v.name, v.value]));
+				const current = new Map((await github.api.listVariables(p.repoOwner, p.repoName, githubEnvironmentFor(p.environment))).map((v) => [v.name, v.value]));
 				const diffs = Object.entries(expected).filter(([k, v]) => (current.get(k) ?? '') !== v).map(([k, v]) => `${k} : ${current.get(k) ?? '∅'} → ${v || '∅'}`);
 				return diffs.length ? { status: 'outdated', detail: diffs.join(' · ') } : { status: 'ok', detail: 'Identiques à la configuration du projet.' };
 			}),

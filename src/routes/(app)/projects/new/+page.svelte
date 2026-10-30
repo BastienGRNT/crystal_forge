@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import Rocket from '@lucide/svelte/icons/rocket';
 	import FolderGit2 from '@lucide/svelte/icons/folder-git-2';
@@ -35,6 +35,7 @@
 	import * as Alert from '$lib/components/atoms/ui/alert';
 	import Spinner from '$lib/components/atoms/spinner.svelte';
 	import { slugify, isValidSlug } from '$lib/domain/slug';
+	import { devSlugFor, ENVIRONMENT_LABELS, PROD_BRANCH, validateEnvironment, type Environment } from '$lib/domain/environments';
 	import { buildFqdn } from '$lib/domain/domain-name';
 	import { assessHostRam, SIZES, type SizeKey } from '$lib/domain/sizes';
 	import { hasEnvErrors, parseEnv } from '$lib/domain/env-file';
@@ -44,19 +45,21 @@
 
 	let { data, form } = $props();
 
-	let repo = $state('');
+	let repo = $state(untrack(() => data.from?.repo ?? ''));
+	let environment = $state<Environment>(untrack(() => (data.from ? 'development' : 'production')));
+	let branch = $state('dev');
 	let inspection = $state<RepoInspection | null>(null);
 	let inspecting = $state(false);
 	let inspectError = $state<string | null>(null);
-	let workdir = $state('.');
-	let name = $state('');
-	let slug = $state('');
+	let workdir = $state(untrack(() => data.from?.workdir ?? '.'));
+	let name = $state(untrack(() => (data.from ? `${data.from.name} (dev)` : '')));
+	let slug = $state(untrack(() => (data.from ? devSlugFor(data.from.slug) : '')));
 	let slugTouched = $state(false);
-	let domains = $state<DomainRow[]>(untrack(() => [{ id: 1, subdomain: '', zone: data.zones[0] ?? '', custom: data.zones.length === 0 }]));
-	let appPort = $state(3000);
+	let domains = $state<DomainRow[]>(untrack(() => [{ id: 1, subdomain: data.from ? `dev.${data.from.slug}` : '', zone: data.zones[0] ?? '', custom: data.zones.length === 0 }]));
+	let appPort = $state(untrack(() => data.from?.appPort ?? 3000));
 	let appService = $state('app');
 	let postDeploy = $state('');
-	let size = $state<SizeKey>('M');
+	let size = $state<SizeKey>(untrack(() => (data.from ? 'S' : 'M')));
 	let env = $state('');
 	let ackRam = $state(false);
 	let ackEnv = $state(false);
@@ -67,7 +70,9 @@
 	async function inspect(full: string, dir: string) {
 		inspecting = true;
 		inspectError = null;
-		const res = await fetch(`/api/github/inspect?${new URLSearchParams({ repo: full, workdir: dir })}`);
+		const q = new URLSearchParams({ repo: full, workdir: dir });
+		if (environment === 'development' && branch.trim()) q.set('branch', branch.trim());
+		const res = await fetch(`/api/github/inspect?${q}`);
 		const j = await res.json();
 		inspecting = false;
 		if (!res.ok) {
@@ -91,9 +96,22 @@
 	function onRepo(r: GhRepo) {
 		workdir = '.';
 		name = r.name.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-		if (!slugTouched) slug = slugify(r.name);
-		if (!domains[0]?.subdomain) domains[0] = { ...(domains[0] as DomainRow), subdomain: slugify(r.name).replace(/^crystal-?/, '') || slugify(r.name) };
+		if (!slugTouched) slug = environment === 'development' ? devSlugFor(slugify(r.name)) : slugify(r.name);
+		if (!domains[0]?.subdomain) {
+			const base = slugify(r.name).replace(/^crystal-?/, '') || slugify(r.name);
+			domains[0] = { ...(domains[0] as DomainRow), subdomain: environment === 'development' ? `dev.${base}` : base };
+		}
 		void inspect(r.fullName, '.');
+	}
+
+	onMount(() => {
+		if (data.from && repo) void inspect(repo, workdir);
+	});
+
+	function setEnvironment(next: Environment) {
+		environment = next;
+		if (!slugTouched && slug) slug = next === 'development' ? devSlugFor(slug) : slug.replace(/-dev$/, '');
+		if (repo) void inspect(repo, workdir);
 	}
 
 	$effect(() => {
@@ -111,6 +129,14 @@
 	const ramTight = $derived(ram?.level === 'tight' || (serverTightMb !== null && ram?.level !== 'insufficient'));
 	const envParsed = $derived(parseEnv(env));
 	const slugOk = $derived(isValidSlug(slug));
+	const envErrors = $derived(
+		repo
+			? validateEnvironment(
+					{ slug, repo, branch: environment === 'production' ? PROD_BRANCH : branch, environment },
+					(inspection?.linked ?? []).map((l) => ({ slug: l.slug, repo, branch: l.branch, environment: l.environment }))
+				)
+			: []
+	);
 	const domainsOk = $derived(domains.length > 0 && domains.every((d) => d.zone.trim() !== ''));
 	const firstFqdn = $derived(domains[0]?.zone ? buildFqdn(domains[0].subdomain, domains[0].zone) : null);
 	const envCheck = $derived(checkEnvAgainst(env, inspection?.envTemplate ?? null, inspection?.compose?.envRefs ?? []));
@@ -119,7 +145,7 @@
 	const migrations = $derived(inspection?.compose?.migrationServices ?? []);
 	const canSubmit = $derived(
 		!!inspection?.detection.supported &&
-			!inspection.linkedProject &&
+			envErrors.length === 0 &&
 			slugOk &&
 			domainsOk &&
 			!hasEnvErrors(envParsed) &&
@@ -147,6 +173,8 @@
 	class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]"
 >
 	<input type="hidden" name="repo" value={repo} />
+	<input type="hidden" name="environment" value={environment} />
+	<input type="hidden" name="branch" value={environment === 'production' ? PROD_BRANCH : branch.trim()} />
 	<input type="hidden" name="workdir" value={workdir} />
 	<input type="hidden" name="domains" value={domainsJson} />
 	<input type="hidden" name="size" value={size} />
@@ -200,13 +228,9 @@
 						</div>
 					{/if}
 
-					{#if inspection.linkedProject}
-						<Alert.Root variant="destructive"
-							><TriangleAlert /><Alert.Description
-								>Ce dépôt est déjà lié au projet Forge « <a class="underline" href="/projects/{inspection.linkedProject}">{inspection.linkedProject}</a> » : un dépôt ne peut servir qu'à un seul projet.</Alert.Description
-							></Alert.Root
-						>
-					{/if}
+					{#each envErrors as e (e)}
+						<Alert.Root variant="destructive"><TriangleAlert /><Alert.Description>{e}</Alert.Description></Alert.Root>
+					{/each}
 					{#each inspection.selfHosted as w (w.file)}
 						<Alert.Root class="border-warning/40 text-warning">
 							<ShieldAlert />
@@ -224,6 +248,25 @@
 		</SectionCard>
 
 		<SectionCard title="2. Identité" description="L'identifiant sert de hostname du CT, de nom et de label du runner." icon={Settings2}>
+			<div class="mb-5 space-y-3">
+				<Label>Environnement</Label>
+				<div class="flex flex-wrap gap-2">
+					{#each ['production', 'development'] as const as env (env)}
+						<Button type="button" variant={environment === env ? 'secondary' : 'outline'} size="sm" class={cn(environment === env && 'ring-2 ring-ember/40')} onclick={() => setEnvironment(env)}>{ENVIRONMENT_LABELS[env]}</Button>
+					{/each}
+				</div>
+				{#if environment === 'production'}
+					<p class="text-xs text-muted-foreground">Déployé depuis la branche <code class="rounded bg-muted px-1">{PROD_BRANCH}</code>. Pour avoir aussi un serveur de dev, créez-le ensuite avec « Ajouter un serveur dev » sur le projet.</p>
+				{:else}
+					<div class="flex flex-wrap items-center gap-2">
+						<Label for="branch" class="text-sm">Branche</Label>
+						<Input id="branch" bind:value={branch} class="w-48 font-mono" placeholder="dev" onchange={() => repo && void inspect(repo, workdir)} />
+					</div>
+					<p class="text-xs text-muted-foreground">
+						Jamais <code class="rounded bg-muted px-1">main</code>. Le serveur de dev a ses propres secrets (environnement GitHub « development ») et son .env part de .env.example. Son domaine est protégé par un identifiant + mot de passe NPM (affiché une seule fois à la création).
+					</p>
+				{/if}
+			</div>
 			<div class="grid gap-4 sm:grid-cols-2">
 				<div class="space-y-2">
 					<Label for="name">Nom affiché</Label>
@@ -370,6 +413,7 @@
 		<SectionCard title="Récapitulatif">
 			<dl class="divide-y">
 				<KeyValue label="Dépôt" mono>{repo || '—'}</KeyValue>
+				<KeyValue label="Environnement">{ENVIRONMENT_LABELS[environment]} · <span class="font-mono">{environment === 'production' ? PROD_BRANCH : branch || '—'}</span></KeyValue>
 				<KeyValue label="Mode">
 					{#if inspection?.detection.supported}<Badge variant="secondary">{inspection.detection.mode === 'compose' ? 'Compose' : 'Dockerfile'}</Badge>{:else}—{/if}
 				</KeyValue>

@@ -20,6 +20,8 @@ export interface ForgeServices {
 	dns: DnsGateway;
 	proxy: ProxyGateway;
 	shell: ShellGateway;
+	/** Propriétaires GitHub autorisés (compte principal + comptes supplémentaires). */
+	githubOwners: () => string[];
 	probe: () => ProbeApi;
 	resolver: () => ResolverApi;
 	repos: {

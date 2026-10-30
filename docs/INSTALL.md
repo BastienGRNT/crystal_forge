@@ -413,6 +413,13 @@ Ensuite, **Réglages → Mise à jour** :
   - Le diff est montré avant le commit, et le commit est marqué `[skip ci]` : il ne déclenche pas de déploiement.
 - **Mises à jour de sécurité** : le template installe `unattended-upgrades`, limité aux dépôts de sécurité d'Ubuntu (Docker exclu, pour éviter un redémarrage surprise des conteneurs). Pour les CT existants : « Mettre à niveau ».
 
+## 8 bis. Serveurs dev/prod, collaborateurs et comptes multiples
+
+- **Dev / prod** : un dépôt peut avoir un serveur de production (branche `main`) et un serveur de développement (autre branche, identifiant en `-dev`). Créez-les depuis « Nouveau projet » (choix de l'environnement) ou, sur un projet existant, via « Ajouter un serveur dev ». Le dev a son propre CT, runner, `.env` (parti de `.env.example`) et ses secrets dans l'environnement GitHub `development` ; son workflow est `forge-deploy-dev.yml` (celui de la prod n'est jamais touché). Son domaine est protégé par une liste d'accès NPM (identifiant `dev` + mot de passe affiché une seule fois dans le journal du job).
+- **Collaborateurs** : page « Utilisateurs » (admin). Un collaborateur ne voit que les projets assignés, avec un niveau Lecture / Déploiement / Édition ; les droits sont vérifiés côté serveur. Pour qu'il atteigne Forge via Tailscale sans voir le reste du Proxmox, limitez-le par ACL Tailscale à l'IP du CT 150 (ex. `10.10.10.150/32`, port 3000/443), ou installez Tailscale dans le CT 150 et partagez ce seul nœud.
+- **Mot de passe oublié** : l'admin génère un lien à usage unique (1 h) depuis « Utilisateurs ». Pour l'admin lui-même : `FORGE_ADMIN_RESET=1` (voir `.env.example`).
+- **Plusieurs comptes GitHub / OVH** : Réglages → comptes supplémentaires. Le routage se fait par propriétaire du dépôt (GitHub) et par zone (OVH).
+
 ## 9. Migrer une app existante (CT de prod) vers Forge
 
 Forge ne touche jamais aux CT de prod. On recrée donc l'app, puis on y copie les données :

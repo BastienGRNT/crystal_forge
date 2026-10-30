@@ -6,6 +6,7 @@ import { ENV_TEMPLATE_FILES, parseEnvTemplate, type EnvTemplate } from '$lib/dom
 import { buildFqdn, isValidSubdomain, normalizeSubdomain, servesDomain } from '$lib/domain/domain-name';
 import { errorMessage } from '$lib/domain/errors';
 import { assessHostRam, hostMemoryInUse, SIZES, type SizeKey } from '$lib/domain/sizes';
+import { workflowPathFor, type Environment } from '$lib/domain/environments';
 import { findSelfHostedWorkflows, WORKFLOW_PATH, type SelfHostedUsage } from '$lib/domain/workflow';
 import { childrenOf } from '$lib/domain/repo-tree';
 import type { GhDirEntry, GhRepo } from '../ports';
@@ -18,7 +19,8 @@ export interface RepoInspection {
 	subdirs: { path: string; detection: DetectionResult }[];
 	selfHosted: SelfHostedUsage[];
 	hasForgeWorkflow: boolean;
-	linkedProject: string | null;
+	/** Serveurs Forge déjà liés à ce dépôt (au plus un par environnement). */
+	linked: { slug: string; environment: Environment; branch: string }[];
 	composeServices: string[];
 	compose: ComposeAnalysis | null;
 	envTemplate: EnvTemplate | null;
@@ -41,12 +43,12 @@ export class WizardService {
 		return list;
 	}
 
-	async inspect(fullName: string, workdirInput?: string): Promise<RepoInspection> {
+	async inspect(fullName: string, workdirInput?: string, branchInput?: string): Promise<RepoInspection> {
 		const [owner, name] = fullName.split('/') as [string, string];
 		const api = this.s.github.api;
 		const repo = await api.getRepo(owner, name);
 		const workdir = normalizeWorkdir(workdirInput);
-		const branch = repo.defaultBranch;
+		const branch = branchInput?.trim() || repo.defaultBranch;
 
 		const list = await this.#lister(owner, name, branch);
 		const [root, here] = await Promise.all([list(''), workdir === '.' ? null : list(workdir)]);
@@ -77,15 +79,18 @@ export class WizardService {
 			findEnvTemplate(api, owner, name, workdir, branch, list)
 		]);
 
-		const linked = this.s.repos.projects.list().find((p) => `${p.repoOwner}/${p.repoName}`.toLowerCase() === fullName.toLowerCase());
+		const linked = this.s.repos.projects
+			.list()
+			.filter((p) => `${p.repoOwner}/${p.repoName}`.toLowerCase() === fullName.toLowerCase())
+			.map((p) => ({ slug: p.slug, environment: p.environment, branch: p.branch }));
 		return {
 			repo,
 			workdir,
 			detection,
 			subdirs,
 			selfHosted: findSelfHostedWorkflows(wfFiles),
-			hasForgeWorkflow: wfFiles.some((f) => f.path === WORKFLOW_PATH),
-			linkedProject: linked?.slug ?? null,
+			hasForgeWorkflow: wfFiles.some((f) => f.path === WORKFLOW_PATH || f.path === workflowPathFor('development')),
+			linked,
 			composeServices: compose?.services.map((x) => x.name) ?? [],
 			compose,
 			envTemplate

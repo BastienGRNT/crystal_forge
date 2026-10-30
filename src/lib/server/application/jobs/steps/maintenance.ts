@@ -41,11 +41,12 @@ async function teardownResource(ctx: StepContext, r: ResourceRow): Promise<void>
 			break;
 		}
 		case 'gh_secret':
-			await github.deleteEnvSecret(owner, repo);
+			// « development:ENV_FILE » : secret de l'environnement GitHub du serveur de dev.
+			await github.deleteEnvSecret(owner, repo, rest.includes(':') ? rest.split(':')[0] : undefined);
 			ctx.log('success', `Secret ${FORGE_SECRET_NAME} supprimé de ${repoFull}.`);
 			break;
 		case 'gh_variable':
-			await github.deleteVariable(owner, repo, rest);
+			await github.deleteVariable(owner, repo, rest.includes(':') ? (rest.split(':')[1] as string) : rest, rest.includes(':') ? rest.split(':')[0] : undefined);
 			ctx.log('success', `Variable ${rest} supprimée de ${repoFull}.`);
 			break;
 		case 'gh_workflow': {
@@ -70,6 +71,10 @@ async function teardownResource(ctx: StepContext, r: ResourceRow): Promise<void>
 		case 'npm_certificate':
 			if (await alreadyGone(() => proxy.deleteCertificate(Number(r.externalId)))) ctx.log('info', `Certificat #${r.externalId} déjà absent de NPM.`);
 			else ctx.log('success', `Certificat #${r.externalId} supprimé.`);
+			break;
+		case 'npm_access_list':
+			if (await alreadyGone(() => proxy.deleteAccessList(Number(r.externalId)))) ctx.log('info', `Liste d'accès #${r.externalId} déjà absente de NPM.`);
+			else ctx.log('success', `Liste d'accès #${r.externalId} supprimée.`);
 			break;
 		case 'ovh_record': {
 			const zone = repoFull;
@@ -108,6 +113,7 @@ const TEARDOWN_ORDER: ResourceRow['type'][] = [
 	'gh_variable',
 	'npm_proxy_host',
 	'npm_certificate',
+	'npm_access_list',
 	'ovh_record',
 	'pve_ct'
 ];
@@ -198,7 +204,7 @@ function teardownStep(key: string, label: string, types: ResourceRow['type'][]):
 }
 
 export const teardownGithubStep = teardownStep('teardown_github', 'Nettoyage GitHub', ['gh_workflow', 'gh_runner', 'gh_secret', 'gh_variable']);
-export const teardownProxyStep = teardownStep('teardown_proxy', 'Suppression des proxy hosts', ['npm_proxy_host', 'npm_certificate']);
+export const teardownProxyStep = teardownStep('teardown_proxy', 'Suppression des proxy hosts', ['npm_proxy_host', 'npm_certificate', 'npm_access_list']);
 export const teardownDnsStep = teardownStep('teardown_dns', 'Suppression des DNS', ['ovh_record']);
 export const destroyCtStep = teardownStep('destroy_ct', 'Suppression du CT', ['pve_ct']);
 

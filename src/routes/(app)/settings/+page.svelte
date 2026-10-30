@@ -118,6 +118,47 @@
 	];
 </script>
 
+{#snippet extraAccounts(kind: 'github' | 'ovh')}
+	{@const list = data.accounts.filter((a) => a.kind === kind)}
+	<SectionCard
+		title={kind === 'github' ? 'Autres comptes GitHub' : 'Autres comptes OVH'}
+		description={kind === 'github'
+			? "Un compte par propriétaire de dépôts : Forge utilise le jeton du propriétaire du dépôt choisi. Le compte ci-dessus reste le compte principal."
+			: "Forge cherche chaque zone dans tous les comptes et utilise celui qui la gère. Le compte ci-dessus reste le compte principal."}
+	>
+		{#if form && 'section' in form && (form.section === kind || form.section === 'accounts') && 'error' in form && form.error}
+			<Alert.Root variant="destructive" class="mb-4"><Alert.Description>{form.error}</Alert.Description></Alert.Root>
+		{/if}
+		<ul class="mb-4 space-y-2">
+			{#each list as a (a.id)}
+				<li class="flex items-center gap-3 rounded-lg border px-3 py-2 text-sm">
+					<span class="font-medium">{a.label}</span>
+					{#if a.owner}<span class="text-muted-foreground">{a.owner}</span>{/if}
+					<form method="POST" action="?/removeAccount" use:enhance class="ml-auto">
+						<input type="hidden" name="id" value={a.id} />
+						<Button type="submit" variant="ghost" size="sm" class="text-destructive">Retirer</Button>
+					</form>
+				</li>
+			{:else}
+				<li class="text-sm text-muted-foreground">Aucun compte supplémentaire.</li>
+			{/each}
+		</ul>
+		<form method="POST" action={kind === 'github' ? '?/addGithub' : '?/addOvh'} use:enhance class="grid gap-3 md:grid-cols-2">
+			<Input name="label" placeholder="Libellé (ex. Perso, Client X)" required />
+			{#if kind === 'github'}
+				<Input name="owner" placeholder="Propriétaire des dépôts" required />
+				<Input name="token" type="password" placeholder="Jeton fine-grained" autocomplete="off" required class="md:col-span-2" />
+			{:else}
+				<Input name="endpoint" placeholder="Endpoint (défaut : eu.api.ovh.com)" />
+				<Input name="appKey" placeholder="Application key" autocomplete="off" required />
+				<Input name="appSecret" type="password" placeholder="Application secret" autocomplete="off" required />
+				<Input name="consumerKey" type="password" placeholder="Consumer key" autocomplete="off" required />
+			{/if}
+			<div class="md:col-span-2"><Button type="submit" size="sm" variant="outline">Ajouter le compte</Button></div>
+		</form>
+	</SectionCard>
+{/snippet}
+
 <svelte:head><title>Réglages · Forge</title></svelte:head>
 
 <PageHeader title="Réglages" description="Les jetons sont chiffrés en base (AES-256-GCM) et ne sont jamais renvoyés au navigateur." />
@@ -257,10 +298,12 @@
 				{#snippet footer()}<Button type="submit" size="sm"><Save /> Enregistrer</Button>{/snippet}
 			</SectionCard>
 		</form>
+		{@render extraAccounts('github')}
 	</Tabs.Content>
 
 	<!-- OVH -->
 	<Tabs.Content value="ovh" class="space-y-6">
+		{@render extraAccounts('ovh')}
 		<form method="POST" action="?/save" use:enhance={saveHandler}>
 			<input type="hidden" name="_section" value="ovh" />
 			<SectionCard title="OVH API" description="Droits limités aux enregistrements des zones (jamais /reset ni /import)." icon={Globe}>

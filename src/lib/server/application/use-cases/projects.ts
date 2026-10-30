@@ -7,7 +7,8 @@ import { isIpv4 } from '$lib/domain/network';
 import { assertSafeCommand } from '$lib/domain/safety-policy';
 import { assessHostRam, hostMemoryInUse, isSizeKey, SIZES, validateResize, type SizeKey } from '$lib/domain/sizes';
 import { isValidSlug, RESERVED_SLUGS, slugify } from '$lib/domain/slug';
-import { GENERATED_COMPOSE_FILE, WORKFLOW_FILE } from '$lib/domain/workflow';
+import { GENERATED_COMPOSE_FILE } from '$lib/domain/workflow';
+import { PROD_BRANCH, validateEnvironment, workflowFileFor, type Environment } from '$lib/domain/environments';
 import type { ProjectRow } from '$server/infrastructure/db/schema';
 import { ReadCommand } from '../gateways';
 import type { JobEngine } from '../jobs/engine';
@@ -40,6 +41,9 @@ export interface CreateProjectInput {
 	dbService?: string;
 	domains: DomainInput[];
 	acknowledgeRam: boolean;
+	/** Production (branche main) par défaut ; développement : branche au choix, jamais main. */
+	environment?: Environment;
+	branch?: string;
 }
 
 export class ProjectService {
@@ -64,6 +68,7 @@ export class ProjectService {
 		const errors: string[] = [];
 
 		const name = input.name.trim() || input.repo.split('/')[1] || '';
+		const environment: Environment = input.environment ?? 'production';
 		const slug = slugify(input.slug || name);
 		if (!isValidSlug(slug)) errors.push(`Identifiant « ${slug} » invalide (lettres minuscules, chiffres, tirets).`);
 		if (RESERVED_SLUGS.has(slug)) errors.push(`« ${slug} » est réservé (nom d'un CT existant).`);
@@ -71,12 +76,16 @@ export class ProjectService {
 
 		const [owner, repoName] = input.repo.split('/');
 		if (!owner || !repoName) errors.push('Dépôt invalide.');
-		else if (!settings.get('github.owner')) errors.push('Propriétaire des dépôts non défini (Réglages → GitHub).');
-		else if (owner.toLowerCase() !== settings.get('github.owner').toLowerCase()) errors.push(`Le dépôt doit appartenir à ${settings.get('github.owner')}.`);
+		else if (!this.s.githubOwners().some(Boolean)) errors.push('Propriétaire des dépôts non défini (Réglages → GitHub).');
+		else if (!this.s.githubOwners().some((o) => o.toLowerCase() === owner.toLowerCase())) errors.push(`Le dépôt doit appartenir à un compte connecté : ${this.s.githubOwners().filter(Boolean).join(', ')}.`);
 		else {
-			// Un dépôt = un projet : un second runner et un workflow qui n'en cible qu'un seraient incohérents.
-			const linked = repos.projects.list().find((p) => `${p.repoOwner}/${p.repoName}`.toLowerCase() === input.repo.toLowerCase());
-			if (linked) errors.push(`Ce dépôt est déjà lié au projet « ${linked.slug} ».`);
+			// Un dépôt a au plus un serveur par environnement (production sur main, développement sur une autre branche).
+			errors.push(
+				...validateEnvironment(
+					{ slug, repo: input.repo, branch: environment === 'production' ? PROD_BRANCH : (input.branch ?? ''), environment },
+					repos.projects.list().map((p) => ({ slug: p.slug, repo: `${p.repoOwner}/${p.repoName}`, branch: p.branch, environment: p.environment }))
+				)
+			);
 		}
 		if (!isIpv4(settings.get('network.publicIp'))) errors.push('IP publique non définie (Réglages → Réseau).');
 
@@ -90,6 +99,7 @@ export class ProjectService {
 		if (!Number.isInteger(input.appPort) || input.appPort < 1 || input.appPort > 65535) errors.push('Port invalide.');
 		if (!isSizeKey(input.size)) errors.push('Taille de CT invalide.');
 		const size = (isSizeKey(input.size) ? input.size : 'M') as SizeKey;
+		const branch = environment === 'production' ? PROD_BRANCH : (input.branch ?? '').trim();
 
 		const env = parseEnv(input.env);
 		if (hasEnvErrors(env)) errors.push(...env.issues.filter((i) => i.level === 'error').map((i) => i.message));
@@ -128,7 +138,7 @@ export class ProjectService {
 
 		// Vérifications distantes (lectures).
 		const repo = await github.api.getRepo(owner as string, repoName as string);
-		const entries = await github.api.listDir(repo.owner, repo.name, workdir === '.' ? '' : workdir, repo.defaultBranch);
+		const entries = await github.api.listDir(repo.owner, repo.name, workdir === '.' ? '' : workdir, branch);
 		const detection = detectDeployMode(entries.filter((e) => e.type === 'file').map((e) => e.name));
 		if (!detection.supported || !detection.mode) throw new UserFacingError(detection.reason);
 
@@ -150,7 +160,7 @@ export class ProjectService {
 		// Base de données : seulement un service réel du compose, d'un type pris en charge.
 		let db: { dbService: string; dbKind: DbKind } | null = null;
 		if (detection.mode === 'compose' && detection.file && input.dbService?.trim()) {
-			const content = (await github.api.getFile(repo.owner, repo.name, repoPath(workdir, detection.file), repo.defaultBranch))?.content ?? '';
+			const content = (await github.api.getFile(repo.owner, repo.name, repoPath(workdir, detection.file), branch))?.content ?? '';
 			const found = analyzeCompose(content).databases.find((x) => x.service === input.dbService?.trim());
 			if (!found) throw new UserFacingError(`Le service « ${input.dbService} » n'est pas une base reconnue du compose.`);
 			db = { dbService: found.service, dbKind: found.kind };
@@ -161,7 +171,8 @@ export class ProjectService {
 			name,
 			repoOwner: repo.owner,
 			repoName: repo.name,
-			branch: repo.defaultBranch,
+			branch,
+			environment,
 			workdir,
 			deployMode: detection.mode,
 			composeFile: detection.mode === 'compose' ? detection.file : null,
@@ -263,7 +274,7 @@ export class ProjectService {
 	}
 
 	async runs(p: ProjectRow) {
-		return this.s.github.api.listWorkflowRuns(p.repoOwner, p.repoName, WORKFLOW_FILE, 25);
+		return this.s.github.api.listWorkflowRuns(p.repoOwner, p.repoName, workflowFileFor(p.environment), 25);
 	}
 
 	async runDetail(p: ProjectRow, runId: number) {

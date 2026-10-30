@@ -25,6 +25,7 @@ export type ResourceType =
 	| 'ovh_record'
 	| 'npm_proxy_host'
 	| 'npm_certificate'
+	| 'npm_access_list'
 	| 'gh_runner'
 	| 'gh_secret'
 	| 'gh_variable'
@@ -259,9 +260,10 @@ export function assertSshTarget(ctx: SafetyContext, host: string, knownForgeIps:
 
 // --- GitHub ---------------------------------------------------------------------
 
-export function assertGithubRepoAllowed(owner: string, repo: string, allowedOwner: string, projectRepos: string[]): void {
-	if (owner.toLowerCase() !== allowedOwner.toLowerCase()) {
-		throw new SafetyViolation('github.owner', `Le dépôt ${owner}/${repo} n'appartient pas à ${allowedOwner}.`);
+export function assertGithubRepoAllowed(owner: string, repo: string, allowedOwners: string[], projectRepos: string[]): void {
+	const owners = allowedOwners.filter(Boolean).map((o) => o.toLowerCase());
+	if (!owners.includes(owner.toLowerCase())) {
+		throw new SafetyViolation('github.owner', `Le dépôt ${owner}/${repo} n'appartient à aucun compte GitHub connecté (${owners.join(', ') || 'aucun'}).`);
 	}
 	if (!projectRepos.map((r) => r.toLowerCase()).includes(`${owner}/${repo}`.toLowerCase())) {
 		throw new SafetyViolation('github.repo', `Le dépôt ${owner}/${repo} n'est lié à aucun projet Forge.`);
@@ -275,6 +277,15 @@ export function assertForgeVariableName(name: string): void {
 }
 
 export const FORGE_SECRET_NAME = 'ENV_FILE';
+
+/** Seul GitHub Environment géré par Forge : celui des serveurs de développement. */
+export const FORGE_ENVIRONMENT = 'development';
+
+export function assertForgeEnvironment(environment: string | undefined): void {
+	if (environment !== undefined && environment !== FORGE_ENVIRONMENT) {
+		throw new SafetyViolation('github.environment', `Environnement interdit : ${environment} (seul « ${FORGE_ENVIRONMENT} » est géré).`);
+	}
+}
 
 export function assertForgeSecretName(name: string): void {
 	if (name !== FORGE_SECRET_NAME) {

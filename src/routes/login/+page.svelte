@@ -29,13 +29,20 @@
 		{#if data.justSetUp}
 			<Alert.Root><ShieldCheck /><Alert.Description>Compte admin créé. Connectez-vous.</Alert.Description></Alert.Root>
 		{/if}
+		{#if data.justReset}
+			<Alert.Root><ShieldCheck /><Alert.Description>Mot de passe modifié. Connectez-vous.</Alert.Description></Alert.Root>
+		{/if}
 		{#if form?.error}
 			<Alert.Root variant="destructive"><Alert.Description>{form.error}</Alert.Description></Alert.Root>
 		{/if}
 		<div class="space-y-2">
-			<Label for="password">Mot de passe administrateur</Label>
+			<Label for="username">Identifiant</Label>
 			<!-- svelte-ignore a11y_autofocus -->
-			<Input id="password" name="password" type="password" required autocomplete="current-password" autofocus />
+			<Input id="username" name="username" value="admin" required autocomplete="username" autofocus />
+		</div>
+		<div class="space-y-2">
+			<Label for="password">Mot de passe</Label>
+			<Input id="password" name="password" type="password" required autocomplete="current-password" />
 		</div>
 		<Button type="submit" class="w-full" size="lg" disabled={pending}>
 			{#if pending}<Spinner />{/if}
@@ -43,6 +50,6 @@
 		</Button>
 	</form>
 	{#snippet footer()}
-		Accessible uniquement via Tailscale{#if data.mode === 'mock'} · <span class="text-ember">mode démo</span>{/if}
+		Mot de passe oublié ? Demandez un lien à l'administrateur.<br />Accessible uniquement via Tailscale{#if data.mode === 'mock'} · <span class="text-ember">mode démo</span>{/if}
 	{/snippet}
 </AuthShell>

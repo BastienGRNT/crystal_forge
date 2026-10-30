@@ -191,8 +191,11 @@ export interface GithubApi {
 	getRun(owner: string, repo: string, runId: number): Promise<GhRun>;
 	getRunJobs(owner: string, repo: string, runId: number): Promise<GhRunJob[]>;
 	getJobLogs(owner: string, repo: string, jobId: number): Promise<string>;
-	getPublicKey(owner: string, repo: string): Promise<{ keyId: string; key: string }>;
-	listVariables(owner: string, repo: string): Promise<{ name: string; value: string }[]>;
+	/** Secrets et variables : au niveau du dépôt, ou d'un GitHub Environment (qui prend le pas sur le dépôt). */
+	getPublicKey(owner: string, repo: string, environment?: string): Promise<{ keyId: string; key: string }>;
+	listVariables(owner: string, repo: string, environment?: string): Promise<{ name: string; value: string }[]>;
+	/** Crée l'environnement s'il n'existe pas (sans règle de protection). */
+	ensureEnvironment(owner: string, repo: string, environment: string): Promise<void>;
 	/** Dernier commit d'une branche. */
 	latestCommit(owner: string, repo: string, branch: string): Promise<{ sha: string; message: string; date: string | null }>;
 	/** Archive tar.gz du dépôt à un commit donné (dossier racine « owner-repo-sha/ »). */
@@ -200,10 +203,10 @@ export interface GithubApi {
 
 	createRegistrationToken(owner: string, repo: string): Promise<{ token: string; expiresAt: string }>;
 	deleteRunner(owner: string, repo: string, runnerId: number): Promise<void>;
-	putSecret(owner: string, repo: string, name: string, encryptedValue: string, keyId: string): Promise<void>;
-	deleteSecret(owner: string, repo: string, name: string): Promise<void>;
-	setVariable(owner: string, repo: string, name: string, value: string): Promise<'created' | 'updated'>;
-	deleteVariable(owner: string, repo: string, name: string): Promise<void>;
+	putSecret(owner: string, repo: string, name: string, encryptedValue: string, keyId: string, environment?: string): Promise<void>;
+	deleteSecret(owner: string, repo: string, name: string, environment?: string): Promise<void>;
+	setVariable(owner: string, repo: string, name: string, value: string, environment?: string): Promise<'created' | 'updated'>;
+	deleteVariable(owner: string, repo: string, name: string, environment?: string): Promise<void>;
 	createFile(
 		owner: string,
 		repo: string,
@@ -309,6 +312,9 @@ export interface NpmApi {
 	updateProxyHost(id: number, patch: { forward_host: string; forward_port: number }): Promise<NpmProxyHost>;
 	deleteProxyHost(id: number): Promise<void>;
 	deleteCertificate(id: number): Promise<void>;
+	/** Liste d'accès NPM protégée par un identifiant et un mot de passe (authentification basique). */
+	createAccessList(name: string, username: string, password: string): Promise<{ id: number }>;
+	deleteAccessList(id: number): Promise<void>;
 }
 
 // --- SSH, sondes, DNS public ---------------------------------------------------------

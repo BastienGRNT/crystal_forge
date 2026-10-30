@@ -19,6 +19,8 @@ export interface AppConfig {
 	secureCookies: boolean;
 	/** Dossier d'échange avec le service de mise à jour du CT 150 (bind mount /opt/forge/updates). */
 	updatesDir: string;
+	/** FORGE_ADMIN_RESET=1 : au démarrage, affiche dans les logs un lien à usage unique pour redéfinir le mot de passe admin. */
+	adminReset: boolean;
 }
 
 function parseBool(v: string | undefined, fallback: boolean): boolean {
@@ -62,7 +64,8 @@ export function getConfig(): AppConfig {
 			.map((s) => s.trim())
 			.filter(Boolean),
 		secureCookies: parseBool(env.FORGE_SECURE_COOKIES, false),
-		updatesDir: env.FORGE_UPDATES_DIR || (mode === 'mock' ? './data/updates' : '/updates')
+		updatesDir: env.FORGE_UPDATES_DIR || (mode === 'mock' ? './data/updates' : '/updates'),
+		adminReset: parseBool(env.FORGE_ADMIN_RESET, false)
 	};
 	return cached;
 }

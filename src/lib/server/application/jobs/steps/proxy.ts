@@ -1,4 +1,5 @@
 /** Étape 6 — Proxy host NPM + certificat Let's Encrypt, un par domaine. */
+import { randomBytes } from 'node:crypto';
 import { servesDomain } from '$lib/domain/domain-name';
 import type { StepDefinition } from '../types';
 import { requireIp } from './common';
@@ -38,6 +39,21 @@ export const proxyStep: StepDefinition = {
 			ctx.log('info', `Email Let's Encrypt non défini dans Réglages : NPM utilisera celui du compte (${email}).`);
 		}
 
+		// Serveur de dev : accès protégé par identifiant + mot de passe (liste d'accès NPM), jamais ouvert au public.
+		let accessListId: number | undefined;
+		if (p.environment === 'development') {
+			const ownedList = repos.resources.active({ projectId: p.id }).find((x) => x.type === 'npm_access_list');
+			if (ownedList) accessListId = Number(ownedList.externalId);
+			else {
+				const username = 'dev';
+				const password = randomBytes(12).toString('base64url');
+				const list = await proxy.createAccessList(`Forge — ${p.slug}`, username, password);
+				ctx.recordResource('npm_access_list', list.id, { username });
+				accessListId = list.id;
+				ctx.log('warn', `Accès au serveur de dev protégé : identifiant « ${username} », mot de passe « ${password} » (affiché une seule fois, notez-le).`);
+			}
+		}
+
 		// État réel (pas le cache d'affichage) : un proxy host créé hors Forge doit être vu.
 		const hosts = await proxy.api.listProxyHosts();
 		const owned = repos.resources.active({ projectId: p.id });
@@ -70,7 +86,7 @@ export const proxyStep: StepDefinition = {
 				throw new Error(`Un proxy host NPM existe déjà pour ${d.fqdn} (#${existing.id} → ${existing.forwardHost}:${existing.forwardPort}), créé hors Forge. Rien n'est écrasé.`);
 			}
 			if (!reuseCert) ctx.log('info', `${d.fqdn} : création du proxy host et demande du certificat Let's Encrypt (jusqu'à 2-3 min)…`);
-			const host = await proxy.createProxyHost({ domain: d.fqdn, forwardHost: ip, forwardPort: p.appPort, email, certificateId: reuseCert });
+			const host = await proxy.createProxyHost({ domain: d.fqdn, forwardHost: ip, forwardPort: p.appPort, email, certificateId: reuseCert, accessListId });
 			ctx.recordResource('npm_proxy_host', host.id, { fqdn: d.fqdn });
 			if (host.certificateId > 0 && host.certificateId !== reuseCert) ctx.recordResource('npm_certificate', host.certificateId, { fqdn: d.fqdn });
 			if (!ctx.dryRun) {

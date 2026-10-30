@@ -1,15 +1,20 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, ne } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNull, lt, ne } from 'drizzle-orm';
 import type { Db } from './client';
 import {
-	admin,
+	accounts,
+	auditLog,
 	domains,
 	jobLogs,
 	jobs,
 	jobSteps,
+	passwordResets,
+	projectMembers,
 	projects,
 	resources,
 	sessions,
 	settings,
+	users,
+	type AccountRow,
 	type DomainRow,
 	type JobLogRow,
 	type JobRow,
@@ -18,8 +23,10 @@ import {
 	type LogLevel,
 	type ProjectRow,
 	type ResourceRow,
-	type StepStatus
+	type StepStatus,
+	type UserRow
 } from './schema';
+import type { AccessLevel, Role } from '$lib/domain/access';
 import type { OwnedResource, ResourceType } from '$lib/domain/safety-policy';
 
 const ts = () => Date.now();
@@ -129,9 +136,15 @@ export class JobRepo {
 	steps(jobId: number): JobStepRow[] {
 		return this.db.select().from(jobSteps).where(eq(jobSteps.jobId, jobId)).orderBy(asc(jobSteps.position)).all();
 	}
-	list(opts: { projectId?: number; limit?: number } = {}): JobRow[] {
+	/** projectIds : ne garde que les jobs de ces projets (collaborateur) ; vide = aucun. */
+	list(opts: { projectId?: number; projectIds?: number[]; limit?: number } = {}): JobRow[] {
+		if (opts.projectIds && opts.projectIds.length === 0) return [];
 		const q = this.db.select().from(jobs);
-		const filtered = opts.projectId !== undefined ? q.where(eq(jobs.projectId, opts.projectId)) : q;
+		const filtered = opts.projectIds
+			? q.where(inArray(jobs.projectId, opts.projectIds))
+			: opts.projectId !== undefined
+				? q.where(eq(jobs.projectId, opts.projectId))
+				: q;
 		return filtered
 			.orderBy(desc(jobs.id))
 			.limit(opts.limit ?? 50)
@@ -277,21 +290,59 @@ export class SettingsRepo {
 export class AuthRepo {
 	constructor(private readonly db: Db) {}
 
-	adminHash(): string | undefined {
-		return this.db.select().from(admin).where(eq(admin.id, 1)).get()?.passwordHash;
+	// --- Utilisateurs ---
+	userCount(): number {
+		return this.db.select({ n: count() }).from(users).get()?.n ?? 0;
 	}
-	setAdminHash(hash: string): void {
+	listUsers(): UserRow[] {
+		return this.db.select().from(users).orderBy(asc(users.id)).all();
+	}
+	userById(id: number): UserRow | undefined {
+		return this.db.select().from(users).where(eq(users.id, id)).get();
+	}
+	userByUsername(username: string): UserRow | undefined {
+		return this.db.select().from(users).where(eq(users.username, username)).get();
+	}
+	firstAdmin(): UserRow | undefined {
+		return this.db.select().from(users).where(eq(users.role, 'admin')).orderBy(asc(users.id)).get();
+	}
+	createUser(input: { username: string; passwordHash: string; role: Role }): UserRow {
+		return this.db.insert(users).values(input).returning().get();
+	}
+	setPassword(userId: number, hash: string): void {
+		this.db.update(users).set({ passwordHash: hash, updatedAt: ts() }).where(eq(users.id, userId)).run();
+	}
+	setDisabled(userId: number, disabled: boolean): void {
+		this.db.update(users).set({ disabled, updatedAt: ts() }).where(eq(users.id, userId)).run();
+	}
+	deleteUser(userId: number): void {
+		this.db.delete(users).where(eq(users.id, userId)).run();
+	}
+
+	// --- Droits par projet ---
+	membershipsOf(userId: number): { projectId: number; level: AccessLevel }[] {
+		return this.db.select({ projectId: projectMembers.projectId, level: projectMembers.level }).from(projectMembers).where(eq(projectMembers.userId, userId)).all();
+	}
+	allMemberships(): { userId: number; projectId: number; level: AccessLevel }[] {
+		return this.db.select({ userId: projectMembers.userId, projectId: projectMembers.projectId, level: projectMembers.level }).from(projectMembers).all();
+	}
+	setMember(userId: number, projectId: number, level: AccessLevel): void {
 		this.db
-			.insert(admin)
-			.values({ id: 1, passwordHash: hash })
-			.onConflictDoUpdate({ target: admin.id, set: { passwordHash: hash, updatedAt: ts() } })
+			.insert(projectMembers)
+			.values({ userId, projectId, level })
+			.onConflictDoUpdate({ target: [projectMembers.userId, projectMembers.projectId], set: { level } })
 			.run();
 	}
-	createSession(idHash: string, expiresAt: number, ip: string | null, userAgent: string | null): void {
-		this.db.insert(sessions).values({ id: idHash, expiresAt, ip, userAgent }).run();
+	removeMember(userId: number, projectId: number): void {
+		this.db.delete(projectMembers).where(and(eq(projectMembers.userId, userId), eq(projectMembers.projectId, projectId))).run();
 	}
-	getSession(idHash: string): { expiresAt: number } | undefined {
-		return this.db.select({ expiresAt: sessions.expiresAt }).from(sessions).where(eq(sessions.id, idHash)).get();
+
+	// --- Sessions ---
+	createSession(idHash: string, userId: number, expiresAt: number, ip: string | null, userAgent: string | null): void {
+		this.db.insert(sessions).values({ id: idHash, userId, expiresAt, ip, userAgent }).run();
+	}
+	getSession(idHash: string): { expiresAt: number; userId: number | null } | undefined {
+		return this.db.select({ expiresAt: sessions.expiresAt, userId: sessions.userId }).from(sessions).where(eq(sessions.id, idHash)).get();
 	}
 	extendSession(idHash: string, expiresAt: number): void {
 		this.db.update(sessions).set({ expiresAt }).where(eq(sessions.id, idHash)).run();
@@ -299,10 +350,55 @@ export class AuthRepo {
 	deleteSession(idHash: string): void {
 		this.db.delete(sessions).where(eq(sessions.id, idHash)).run();
 	}
-	deleteAllSessions(): void {
-		this.db.delete(sessions).run();
+	deleteSessionsOf(userId: number): void {
+		this.db.delete(sessions).where(eq(sessions.userId, userId)).run();
 	}
 	purgeExpired(): void {
 		this.db.delete(sessions).where(lt(sessions.expiresAt, ts())).run();
+		this.db.delete(passwordResets).where(lt(passwordResets.expiresAt, ts())).run();
+	}
+
+	// --- Réinitialisation du mot de passe ---
+	createReset(idHash: string, userId: number, expiresAt: number): void {
+		this.db.delete(passwordResets).where(eq(passwordResets.userId, userId)).run();
+		this.db.insert(passwordResets).values({ id: idHash, userId, expiresAt }).run();
+	}
+	getReset(idHash: string): { userId: number; expiresAt: number } | undefined {
+		return this.db.select({ userId: passwordResets.userId, expiresAt: passwordResets.expiresAt }).from(passwordResets).where(eq(passwordResets.id, idHash)).get();
+	}
+	deleteResetsOf(userId: number): void {
+		this.db.delete(passwordResets).where(eq(passwordResets.userId, userId)).run();
+	}
+}
+
+export class AuditRepo {
+	constructor(private readonly db: Db) {}
+
+	add(entry: { userId: number | null; username: string; method: string; path: string; status: number; ip: string | null }): void {
+		this.db.insert(auditLog).values(entry).run();
+	}
+	recent(limit = 100) {
+		return this.db.select().from(auditLog).orderBy(desc(auditLog.id)).limit(limit).all();
+	}
+}
+
+export class AccountRepo {
+	constructor(private readonly db: Db) {}
+
+	list(kind?: AccountRow['kind']): AccountRow[] {
+		const q = this.db.select().from(accounts);
+		return (kind ? q.where(eq(accounts.kind, kind)) : q).orderBy(asc(accounts.id)).all();
+	}
+	get(id: number): AccountRow | undefined {
+		return this.db.select().from(accounts).where(eq(accounts.id, id)).get();
+	}
+	create(data: { kind: AccountRow['kind']; label: string; owner: string | null; config: string }): AccountRow {
+		return this.db.insert(accounts).values(data).returning().get();
+	}
+	update(id: number, data: { label?: string; owner?: string | null; config?: string }): void {
+		this.db.update(accounts).set({ ...data, updatedAt: ts() }).where(eq(accounts.id, id)).run();
+	}
+	delete(id: number): void {
+		this.db.delete(accounts).where(eq(accounts.id, id)).run();
 	}
 }

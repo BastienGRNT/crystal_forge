@@ -1,8 +1,10 @@
-import { redirect, type Handle, type HandleServerError, type ServerInit } from '@sveltejs/kit';
+import { error, redirect, type Handle, type HandleServerError, type RequestEvent, type ServerInit } from '@sveltejs/kit';
 import { forge } from '$server/container';
 import { SESSION_COOKIE } from '$server/application/use-cases/auth';
 import { getConfig } from '$server/infrastructure/config';
 import { inCidr, isIpv4 } from '$lib/domain/network';
+import { levelAtLeast, normalizePath, requirementFor } from '$lib/domain/access';
+import type { SessionUser } from '$server/application/use-cases/auth';
 
 export const init: ServerInit = async () => {
 	forge();
@@ -19,7 +21,37 @@ function isAllowed(ip: string, cidrs: string[]): boolean {
 	return cidrs.some((c) => !c.includes(':') && inCidr(ip, c));
 }
 
-const PUBLIC_PATHS = ['/login', '/setup'];
+const PUBLIC_PATHS = ['/login', '/setup', '/reset'];
+
+/**
+ * Droits d'un collaborateur, vérifiés sur CHAQUE requête (page, action de formulaire, API).
+ * Renvoie la réponse de refus, ou null si la requête est permise. L'admin passe toujours.
+ */
+function authorize(user: SessionUser, event: RequestEvent): Response | null {
+	if (user.role === 'admin') return null;
+	const f = forge();
+	const req = requirementFor(event.request.method, event.url.pathname, event.url.search);
+	let allowed = false;
+	if (req.kind === 'any') allowed = true;
+	else if (req.kind === 'project' || req.kind === 'job') {
+		let projectId: number | null | undefined;
+		if (req.kind === 'project') {
+			const p = f.repos.projects.bySlug(req.slug);
+			projectId = p && p.status !== 'deleted' ? p.id : null;
+		} else {
+			projectId = f.repos.jobs.get(req.id)?.projectId;
+		}
+		allowed = projectId != null && levelAtLeast(f.auth.levelFor(user, projectId), req.level);
+	}
+	if (allowed) return null;
+
+	const path = normalizePath(event.url.pathname);
+	const isGet = event.request.method === 'GET' || event.request.method === 'HEAD';
+	if (isGet && path === '/' && !event.url.pathname.endsWith('__data.json')) redirect(303, '/projects');
+	const message = 'Accès refusé : vos droits ne permettent pas cette action.';
+	if (path.startsWith('/api/')) return new Response(JSON.stringify({ message }), { status: 403, headers: { 'content-type': 'application/json' } });
+	error(403, message);
+}
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const f = forge();
@@ -45,6 +77,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	const session = f.auth.validate(event.cookies.get(SESSION_COOKIE));
 	event.locals.authenticated = !!session;
+	event.locals.user = session?.user ?? null;
 	if (session) {
 		event.cookies.set(SESSION_COOKIE, event.cookies.get(SESSION_COOKIE) as string, {
 			path: '/',
@@ -59,7 +92,23 @@ export const handle: Handle = async ({ event, resolve }) => {
 		redirect(303, `/login?next=${encodeURIComponent(path + event.url.search)}`);
 	}
 
+	if (session) {
+		const denied = authorize(session.user, event);
+		if (denied) return denied;
+	}
+
 	const response = await resolve(event);
+	// Journal : qui a fait quelle écriture (jamais le contenu des formulaires).
+	if (session && event.request.method !== 'GET' && event.request.method !== 'HEAD') {
+		f.audit.add({
+			userId: session.user.id,
+			username: session.user.username,
+			method: event.request.method,
+			path: (event.url.pathname + event.url.search).slice(0, 300),
+			status: response.status,
+			ip
+		});
+	}
 	response.headers.set('X-Frame-Options', 'DENY');
 	response.headers.set('X-Content-Type-Options', 'nosniff');
 	response.headers.set('Referrer-Policy', 'no-referrer');

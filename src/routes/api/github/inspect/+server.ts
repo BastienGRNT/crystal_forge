@@ -6,7 +6,7 @@ import type { RequestHandler } from './$types';
 export const GET: RequestHandler = async ({ url }) => {
 	const repo = url.searchParams.get('repo') ?? '';
 	try {
-		return json(await forge().wizard.inspect(repo, url.searchParams.get('workdir') ?? '.'));
+		return json(await forge().wizard.inspect(repo, url.searchParams.get('workdir') ?? '.', url.searchParams.get('branch') ?? undefined));
 	} catch (err) {
 		return json({ error: errorMessage(err) }, { status: 400 });
 	}

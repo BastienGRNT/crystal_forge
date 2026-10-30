@@ -26,7 +26,7 @@ function gateway() {
 	const guard = new WriteGuard(() => false, (s) => s);
 	const ownership = { owned: () => [{ type: 'pve_ct' as const, externalId: String(CTID), projectId: 1 }] };
 	const projects = { forgeIps: () => [IP], forgeRepos: () => [] };
-	return new ProxmoxGateway({ apis: () => apis, guard, settings, ownership, projects });
+	return new ProxmoxGateway({ apis: () => apis, guard, settings, ownership, projects, githubOwners: () => [] });
 }
 
 /** Termine immédiatement une tâche simulée. */
@@ -78,7 +78,7 @@ function proxyGateway() {
 	const notes = world().npmHosts.find((h) => h.domainNames.includes('notes.bastiengrnt.fr'));
 	const ownership = { owned: () => [{ type: 'npm_proxy_host' as const, externalId: String(notes?.id), projectId: 1 }] };
 	const projects = { forgeIps: () => ['10.10.10.60'], forgeRepos: () => [] };
-	return { npm: new ProxyGateway({ apis: () => apis, guard, settings, ownership, projects }), notes };
+	return { npm: new ProxyGateway({ apis: () => apis, guard, settings, ownership, projects, githubOwners: () => [] }), notes };
 }
 
 describe('ProxyGateway — changement de port', () => {

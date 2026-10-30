@@ -3,6 +3,7 @@ export const RESOURCE_LABEL: Record<string, string> = {
 	ovh_record: 'Enregistrement DNS',
 	npm_proxy_host: 'Proxy host NPM',
 	npm_certificate: 'Certificat SSL',
+	npm_access_list: "Liste d'accès NPM",
 	gh_runner: 'Runner GitHub',
 	gh_secret: 'Secret GitHub',
 	gh_variable: 'Variable GitHub',

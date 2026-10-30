@@ -228,21 +228,34 @@ export class GithubClient implements GithubApi {
 		}
 	}
 
-	async getPublicKey(owner: string, repo: string) {
+	async getPublicKey(owner: string, repo: string, environment?: string) {
 		try {
-			const res = await this.#o.rest.actions.getRepoPublicKey({ owner, repo });
+			const res = environment
+				? await this.#o.rest.actions.getEnvironmentPublicKey({ owner, repo, environment_name: environment })
+				: await this.#o.rest.actions.getRepoPublicKey({ owner, repo });
 			return { keyId: res.data.key_id, key: res.data.key };
 		} catch (e) {
 			wrap(e, 'clé publique des secrets');
 		}
 	}
 
-	async listVariables(owner: string, repo: string) {
+	async listVariables(owner: string, repo: string, environment?: string) {
 		try {
-			const res = await this.#o.rest.actions.listRepoVariables({ owner, repo, per_page: 30 });
+			const res = environment
+				? await this.#o.rest.actions.listEnvironmentVariables({ owner, repo, environment_name: environment, per_page: 30 })
+				: await this.#o.rest.actions.listRepoVariables({ owner, repo, per_page: 30 });
 			return res.data.variables.map((v) => ({ name: v.name, value: v.value }));
 		} catch (e) {
+			if (environment && (e as { status?: number }).status === 404) return [];
 			wrap(e, 'variables du dépôt');
+		}
+	}
+
+	async ensureEnvironment(owner: string, repo: string, environment: string) {
+		try {
+			await this.#o.rest.repos.createOrUpdateEnvironment({ owner, repo, environment_name: environment });
+		} catch (e) {
+			wrap(e, `environnement ${environment}`);
 		}
 	}
 
@@ -281,41 +294,56 @@ export class GithubClient implements GithubApi {
 		}
 	}
 
-	async putSecret(owner: string, repo: string, name: string, encryptedValue: string, keyId: string) {
+	async putSecret(owner: string, repo: string, name: string, encryptedValue: string, keyId: string, environment?: string) {
 		try {
-			await this.#o.rest.actions.createOrUpdateRepoSecret({ owner, repo, secret_name: name, encrypted_value: encryptedValue, key_id: keyId });
+			if (environment) {
+				await this.#o.rest.actions.createOrUpdateEnvironmentSecret({
+					owner, repo,
+					environment_name: environment,
+					secret_name: name,
+					encrypted_value: encryptedValue,
+					key_id: keyId
+				});
+			} else {
+				await this.#o.rest.actions.createOrUpdateRepoSecret({ owner, repo, secret_name: name, encrypted_value: encryptedValue, key_id: keyId });
+			}
 		} catch (e) {
 			wrap(e, `écriture du secret ${name}`);
 		}
 	}
 
-	async deleteSecret(owner: string, repo: string, name: string) {
+	async deleteSecret(owner: string, repo: string, name: string, environment?: string) {
 		try {
-			await this.#o.rest.actions.deleteRepoSecret({ owner, repo, secret_name: name });
+			if (environment) await this.#o.rest.actions.deleteEnvironmentSecret({ owner, repo, environment_name: environment, secret_name: name });
+			else await this.#o.rest.actions.deleteRepoSecret({ owner, repo, secret_name: name });
 		} catch (e) {
 			if ((e as { status?: number }).status === 404) return;
 			wrap(e, `suppression du secret ${name}`);
 		}
 	}
 
-	async setVariable(owner: string, repo: string, name: string, value: string): Promise<'created' | 'updated'> {
+	async setVariable(owner: string, repo: string, name: string, value: string, environment?: string): Promise<'created' | 'updated'> {
+		const scope = environment ? { owner, repo, environment_name: environment } : null;
 		try {
-			await this.#o.rest.actions.updateRepoVariable({ owner, repo, name, value });
+			if (scope) await this.#o.rest.actions.updateEnvironmentVariable({ ...scope, name, value });
+			else await this.#o.rest.actions.updateRepoVariable({ owner, repo, name, value });
 			return 'updated';
 		} catch (e) {
 			if ((e as { status?: number }).status !== 404) wrap(e, `variable ${name}`);
 		}
 		try {
-			await this.#o.rest.actions.createRepoVariable({ owner, repo, name, value });
+			if (scope) await this.#o.rest.actions.createEnvironmentVariable({ ...scope, name, value });
+			else await this.#o.rest.actions.createRepoVariable({ owner, repo, name, value });
 			return 'created';
 		} catch (e) {
 			wrap(e, `création de la variable ${name}`);
 		}
 	}
 
-	async deleteVariable(owner: string, repo: string, name: string) {
+	async deleteVariable(owner: string, repo: string, name: string, environment?: string) {
 		try {
-			await this.#o.rest.actions.deleteRepoVariable({ owner, repo, name });
+			if (environment) await this.#o.rest.actions.deleteEnvironmentVariable({ owner, repo, environment_name: environment, name });
+			else await this.#o.rest.actions.deleteRepoVariable({ owner, repo, name });
 		} catch (e) {
 			if ((e as { status?: number }).status === 404) return;
 			wrap(e, `suppression de la variable ${name}`);

@@ -72,7 +72,7 @@ export class JobQueries {
 		};
 	}
 
-	list(opts: { projectId?: number; limit?: number } = {}): JobSummary[] {
+	list(opts: { projectId?: number; projectIds?: number[]; limit?: number } = {}): JobSummary[] {
 		return this.s.repos.jobs.list(opts).map((j) => this.summary(j));
 	}
 
