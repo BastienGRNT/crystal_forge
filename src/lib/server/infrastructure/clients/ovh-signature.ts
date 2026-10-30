@@ -38,7 +38,8 @@ export function dangerousOvhRules(rules: OvhRule[]): { rule: OvhRule; reason: st
 /** Lien createToken avec les droits minimaux, par zone. */
 export function ovhCreateTokenUrl(endpointBase: string, zones: string[], includeDelete: boolean): string {
 	const host = new URL(endpointBase).origin;
-	const params: string[] = ['GET=/domain/zone', 'GET=/auth/currentCredential'];
+	// GET /domain/zone/* (lecture seule) : le challenge DNS wildcard de certbot (NPM) sonde chaque parent du nom (dev.ct.zone.fr, ct.zone.fr…).
+	const params: string[] = ['GET=/domain/zone', 'GET=/domain/zone/*', 'GET=/auth/currentCredential'];
 	// Zones inconnues (clés OVH pas encore saisies) : règles valables pour toutes les zones.
 	for (const z of zones.length ? zones : ['*']) {
 		params.push(`GET=/domain/zone/${z}/record`, `GET=/domain/zone/${z}/record/*`, `POST=/domain/zone/${z}/record`, `POST=/domain/zone/${z}/refresh`);

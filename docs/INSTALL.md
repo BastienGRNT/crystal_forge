@@ -302,7 +302,7 @@ Collez le jeton (`github_pat_…`) dans Réglages → GitHub, avec le **proprié
 Ouvrez le lien **createToken** proposé dans Réglages → OVH : il est généré pour vos zones. Les zones doivent être **celles que gère réellement ce compte OVH** : le test de connexion les liste. Une zone d'un autre compte, même saisie dans l'assistant, est refusée par Forge (« n'est pas gérée par ce compte OVH ») et aucun enregistrement n'est créé. L'exemple ci-dessous, pour `bastiengrnt.fr` et `pharmagaia.com`, ne vaut que si les deux sont sur ce compte :
 
 ```
-https://eu.api.ovh.com/createToken/?GET=/domain/zone&GET=/auth/currentCredential
+https://eu.api.ovh.com/createToken/?GET=/domain/zone&GET=/domain/zone/*&GET=/auth/currentCredential
   &GET=/domain/zone/bastiengrnt.fr/record&GET=/domain/zone/bastiengrnt.fr/record/*
   &POST=/domain/zone/bastiengrnt.fr/record&POST=/domain/zone/bastiengrnt.fr/refresh
   &DELETE=/domain/zone/bastiengrnt.fr/record/*
@@ -310,6 +310,7 @@ https://eu.api.ovh.com/createToken/?GET=/domain/zone&GET=/auth/currentCredential
 ```
 
 - **Ne donnez jamais `POST /domain/zone/*`** : cette règle couvre aussi `/reset`, qui vide la zone, et `/import`. Le test de connexion signale ce genre de règle.
+- `GET /domain/zone/*` (lecture seule) est nécessaire aux domaines **wildcard** : le challenge DNS de certbot sonde chaque parent du nom. Sans lui, NPM répond « HTTP 500 » et son log dit « Error determining zone identifier … 403 Forbidden ».
 - Le `DELETE` sur `/record/*` est optionnel. Sans lui, le rollback et le retrait d'un domaine vous indiqueront l'enregistrement à supprimer à la main.
 - Forge ne crée que des enregistrements **A** vers l'IP publique du serveur (Réglages → Réseau, obligatoire), et seulement si aucun A, AAAA ou CNAME n'existe déjà pour ce nom.
 

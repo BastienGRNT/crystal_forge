@@ -1,4 +1,5 @@
 /** Étape 6 — Proxy host NPM + certificat Let's Encrypt, un par domaine. */
+import { errorMessage } from '$lib/domain/errors';
 import { randomBytes } from 'node:crypto';
 import { isWildcard, servesDomain } from '$lib/domain/domain-name';
 import type { StepDefinition } from '../types';
@@ -96,7 +97,11 @@ export const proxyStep: StepDefinition = {
 					if (d.mode !== 'ovh' || !d.zone) throw new Error(`${d.fqdn} : un wildcard exige un domaine géré chez OVH (challenge DNS). Ajoutez le certificat wildcard dans NPM à la main, puis « Reprendre ».`);
 					ctx.log('info', `${d.fqdn} : demande du certificat wildcard par challenge DNS OVH (propagation : 2-3 min)…`);
 					const ovh = await ctx.services.ovhCredentialsFor(d.zone);
-					const cert = await proxy.createDnsCertificate({ domain: d.fqdn, email, ovh });
+					const cert = await proxy.createDnsCertificate({ domain: d.fqdn, email, ovh }).catch((err) => {
+						throw new Error(
+							`${errorMessage(err)} — consultez le log de NPM (docker logs). Cause fréquente : la clé OVH n'a pas « GET /domain/zone/* » (régénérez-la avec le lien de Réglages → OVH, puis « Reprendre »).`
+						);
+					});
 					ctx.recordResource('npm_certificate', cert.id, { fqdn: d.fqdn });
 					reuseCert = cert.id;
 					ctx.log('success', `${d.fqdn} : certificat #${cert.id} créé.`);
