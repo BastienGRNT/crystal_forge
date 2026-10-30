@@ -99,10 +99,7 @@ export class NpmClient implements NpmApi {
 	}
 
 	async me(): Promise<NpmUser> {
-		const u = await this.#call<{ id: number; email: string; name: string; roles?: string[]; permissions?: Record<string, string> | null }>(
-			'GET',
-			'/users/me?expand=permissions'
-		);
+		const u = await this.#call<{ id: number; email: string; name: string; roles?: string[]; permissions?: Record<string, string> | null }>('GET', '/users/me?expand=permissions');
 		return { id: u.id, email: u.email, name: u.name, roles: u.roles ?? [], permissions: u.permissions ?? null };
 	}
 
@@ -111,10 +108,7 @@ export class NpmClient implements NpmApi {
 	}
 
 	async listCertificates(): Promise<NpmCertificate[]> {
-		const rows = await this.#call<{ id: number; nice_name: string; domain_names: string[]; expires_on?: string | null; provider: string }[]>(
-			'GET',
-			'/nginx/certificates'
-		);
+		const rows = await this.#call<{ id: number; nice_name: string; domain_names: string[]; expires_on?: string | null; provider: string }[]>('GET', '/nginx/certificates');
 		return rows.map((c) => ({ id: c.id, niceName: c.nice_name, domainNames: c.domain_names, expiresOn: c.expires_on ?? null, provider: c.provider }));
 	}
 
@@ -143,14 +137,59 @@ export class NpmClient implements NpmApi {
 			`dns_ovh_application_secret = ${input.ovh.appSecret}`,
 			`dns_ovh_consumer_key = ${input.ovh.consumerKey}`
 		].join('\n');
-		const body = {
-			provider: 'letsencrypt',
-			domain_names: [input.domain],
-			meta: { letsencrypt_email: input.email, letsencrypt_agree: true, dns_challenge: true, dns_provider: 'ovh', dns_provider_credentials: credentials, propagation_seconds: 60 }
+		// Les champs de « meta » acceptés varient selon la version de NPM (additionalProperties: false) :
+		// on ne garde que ceux que le schéma de CETTE instance déclare.
+		const allowed = await this.#certificateMetaKeys();
+		const wanted: Record<string, unknown> = {
+			letsencrypt_email: input.email,
+			letsencrypt_agree: true,
+			dns_challenge: true,
+			dns_provider: 'ovh',
+			dns_provider_credentials: credentials,
+			propagation_seconds: 60
 		};
+		const meta = Object.fromEntries(Object.entries(wanted).filter(([k]) => !allowed || allowed.has(k)));
+		const body = { provider: 'letsencrypt', domain_names: [input.domain], meta };
 		// Challenge DNS + propagation : plusieurs minutes possibles.
-		const r = await this.#call<{ id: number; nice_name?: string; domain_names: string[]; expires_on?: string | null; provider?: string }>('POST', '/nginx/certificates', body, 360_000);
-		return { id: r.id, niceName: r.nice_name ?? input.domain, domainNames: r.domain_names ?? [input.domain], expiresOn: r.expires_on ?? null, provider: r.provider ?? 'letsencrypt' };
+		const r = await this.#call<{ id: number; nice_name?: string; domain_names: string[]; expires_on?: string | null; provider?: string }>(
+			'POST',
+			'/nginx/certificates',
+			body,
+			360_000
+		);
+		return {
+			id: r.id,
+			niceName: r.nice_name ?? input.domain,
+			domainNames: r.domain_names ?? [input.domain],
+			expiresOn: r.expires_on ?? null,
+			provider: r.provider ?? 'letsencrypt'
+		};
+	}
+
+	/** Propriétés de « meta » déclarées par le schéma OpenAPI de NPM, ou null si illisible. */
+	async #certificateMetaKeys(): Promise<Set<string> | null> {
+		try {
+			const schema = await this.#call<Record<string, unknown>>('GET', '/schema');
+			const resolve = (n: unknown): Record<string, unknown> | undefined => {
+				let node = n as Record<string, unknown> | undefined;
+				for (let i = 0; i < 10 && node && typeof node.$ref === 'string'; i++) {
+					node = (node.$ref as string)
+						.replace(/^#\//, '')
+						.split('/')
+						.reduce<unknown>((acc, k) => (acc as Record<string, unknown> | undefined)?.[k], schema) as Record<string, unknown> | undefined;
+				}
+				return node;
+			};
+			const paths = schema.paths as Record<string, Record<string, unknown>> | undefined;
+			const post = resolve(paths?.['/nginx/certificates']?.post) as { requestBody?: unknown } | undefined;
+			const content = resolve(post?.requestBody) as { content?: Record<string, { schema?: unknown }> } | undefined;
+			const body = resolve(content?.content?.['application/json']?.schema) as { properties?: Record<string, unknown> } | undefined;
+			const meta = resolve(body?.properties?.meta) as { properties?: Record<string, unknown> } | undefined;
+			const keys = meta?.properties ? Object.keys(meta.properties) : [];
+			return keys.length ? new Set(keys) : null;
+		} catch {
+			return null;
+		}
 	}
 
 	async createAccessList(name: string, username: string, password: string) {
