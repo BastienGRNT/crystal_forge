@@ -7,7 +7,8 @@ const config = {
 	compilerOptions: { runes: true },
 	kit: {
 		adapter: adapter({ out: 'build' }),
-		csrf: { trustedOrigins: [] },
+		// Contrôle d'origine fait dans hooks.server.ts (compare Origin et Host, sans ORIGIN figé).
+		csrf: { trustedOrigins: ['*'] },
 		alias: {
 			'$server': 'src/lib/server'
 		}

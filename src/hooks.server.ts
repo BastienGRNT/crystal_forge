@@ -70,6 +70,20 @@ export const handle: Handle = async ({ event, resolve }) => {
 		return new Response('Accès refusé : Forge n’est accessible que via Tailscale.', { status: 403 });
 	}
 
+	// 1 bis. Anti-CSRF : l'origine d'une requête qui modifie doit être l'adresse par laquelle elle arrive
+	// (IP, nom Tailscale…), sans dépendre d'un ORIGIN figé dans la configuration.
+	if (!['GET', 'HEAD', 'OPTIONS'].includes(event.request.method)) {
+		const origin = event.request.headers.get('origin');
+		const host = event.request.headers.get('host');
+		let sameHost = false;
+		try {
+			sameHost = !!origin && !!host && new URL(origin).host === host;
+		} catch {
+			// Origin illisible (« null ») : refus.
+		}
+		if (!sameHost) return new Response('Cross-site POST form submissions are forbidden', { status: 403 });
+	}
+
 	// 2. Authentification.
 	const path = event.url.pathname;
 	const isPublic = PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));

@@ -16,7 +16,6 @@ services:
       FORGE_MODE: ${FORGE_MODE:-live}
       DRY_RUN: ${DRY_RUN:-true}
       PORT: 3000
-      ORIGIN: ${ORIGIN:-http://10.10.10.15:3000}
       FORGE_UPDATES_DIR: /updates
     volumes:
       - forge-data:/data
