@@ -184,7 +184,17 @@ export const backupStep: StepDefinition = {
 		}
 		const upid = await ctx.services.proxmox.backup(p.ctid);
 		ctx.log('info', 'Sauvegarde en cours (le CT est brièvement suspendu)…');
-		await ctx.services.proxmox.waitTask(upid, { timeoutMs: 60 * 60_000, onLine: (l) => ctx.log('debug', l) });
+		// Un CT qui écrit pendant la sauvegarde (build Docker…) produit des milliers de « file has vanished » :
+		// on les compte au lieu de tous les journaliser (le journal et la page en saturent).
+		let vanished = 0;
+		await ctx.services.proxmox.waitTask(upid, {
+			timeoutMs: 60 * 60_000,
+			onLine: (l) => {
+				if (/file has vanished/i.test(l) || /^\s*"\/proc\//.test(l)) vanished++;
+				else ctx.log('debug', l.slice(0, 400));
+			}
+		});
+		if (vanished) ctx.log('warn', `${vanished} fichier(s) modifiés pendant la sauvegarde (normal si un build tournait dans le CT) : ignorés.`);
 		ctx.state.done = true;
 		ctx.save();
 		const last = ctx.dryRun ? null : (await ctx.services.proxmox.listBackups(p.ctid, { fresh: true }))[0];
