@@ -42,6 +42,7 @@ describe('generateWorkflow', () => {
 	it('lance compose up --build --remove-orphans puis le post-déploiement conditionnel', () => {
 		const runs = doc.jobs.deploy.steps.map((s: { run?: string }) => s.run ?? '').join('\n');
 		expect(runs).toContain('docker compose -f "$FORGE_COMPOSE_FILE" up -d --build --remove-orphans');
+		expect(yml).toContain('COMPOSE_PARALLEL_LIMIT: 1');
 		const post = doc.jobs.deploy.steps.find((s: { name: string }) => s.name === 'Post-déploiement');
 		expect(post.if).toBe("${{ vars.FORGE_POST_DEPLOY != '' }}");
 		expect(post.run).toContain('exec -T');

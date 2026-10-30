@@ -162,6 +162,10 @@ ${dockerfileStep}
 ${indent(workflowBackupScript(slug), 10)}
 
       - name: Construire et démarrer
+        env:
+          # Une image à la fois : plusieurs builds en parallèle (pnpm install, dotnet…) saturent la RAM
+          # du CT et le runner perd la communication avec GitHub.
+          COMPOSE_PARALLEL_LIMIT: 1
         run: |
           set -euo pipefail
           cd "\${FORGE_WORKDIR:-.}"
