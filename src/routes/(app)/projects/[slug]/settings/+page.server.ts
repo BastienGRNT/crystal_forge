@@ -8,7 +8,8 @@ export const load: PageServerLoad = ({ params }) => {
 	const p = f.projects.get(params.slug);
 	const resources = f.projects.ownedResources(p).map((r) => ({ type: r.type, externalId: r.externalId, meta: JSON.parse(r.meta) as Record<string, unknown> }));
 	// Comparaison avec ce que Forge produirait aujourd'hui (GitHub, Proxmox, SSH) : en différé.
-	return { resources, upgrade: f.upgrade.view(p) };
+	const protection = p.environment === 'development' ? f.projects.devProtection(p).catch(() => null) : Promise.resolve(null);
+	return { resources, upgrade: f.upgrade.view(p), protection };
 };
 
 export const actions: Actions = {
@@ -37,6 +38,16 @@ export const actions: Actions = {
 			return fail(400, { error: errorMessage(err) });
 		}
 		redirect(303, `/jobs/${id}`);
+	},
+	protection: async ({ params, request }) => {
+		const f = forge();
+		const d = await request.formData();
+		try {
+			await f.projects.setDevProtection(f.projects.get(params.slug), d.get('enabled') === 'true');
+		} catch (err) {
+			return fail(400, { error: errorMessage(err) });
+		}
+		return { protectionDone: true };
 	},
 	delete: async ({ params, request }) => {
 		const f = forge();

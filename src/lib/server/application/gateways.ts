@@ -678,6 +678,7 @@ export class ProxyGateway {
 				forwardHost: input.forwardHost,
 				forwardPort: input.forwardPort,
 				certificateId: -1,
+				accessListId: 0,
 				sslForced: true,
 				enabled: true,
 				nginxOnline: null,
@@ -706,12 +707,28 @@ export class ProxyGateway {
 				forwardHost,
 				forwardPort,
 				certificateId: -1,
+				accessListId: 0,
 				sslForced: true,
 				enabled: true,
 				nginxOnline: null,
 				nginxError: null,
 				certificate: null
 			})
+		});
+	}
+
+	/** Applique (liste créée par Forge) ou retire (0) la protection par mot de passe d'un proxy host créé par Forge. */
+	setAccessList(hostId: number, accessListId: number): Promise<NpmProxyHost> {
+		return this.#run({
+			system: 'npm',
+			action: 'proxy-host.update',
+			summary: accessListId > 0 ? `Proxy host #${hostId} : protéger par la liste d'accès #${accessListId}` : `Proxy host #${hostId} : retirer la liste d'accès (site ouvert)`,
+			check: () => {
+				assertOwned('npm_proxy_host', hostId, this.d.ownership.owned('npm_proxy_host'), 'Le proxy host');
+				if (accessListId > 0) assertOwned('npm_access_list', accessListId, this.d.ownership.owned('npm_access_list'), "La liste d'accès");
+			},
+			execute: () => this.api.setProxyHostAccessList(hostId, accessListId),
+			simulate: () => ({ id: hostId, domainNames: [], forwardScheme: 'http', forwardHost: '', forwardPort: 0, certificateId: -1, accessListId, sslForced: true, enabled: true, nginxOnline: null, nginxError: null, certificate: null })
 		});
 	}
 

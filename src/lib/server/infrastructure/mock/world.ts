@@ -92,6 +92,7 @@ export interface FakeNpmHost {
 	forwardHost: string;
 	forwardPort: number;
 	certificateId: number;
+	accessListId?: number;
 }
 
 export interface FakeNpmCert {

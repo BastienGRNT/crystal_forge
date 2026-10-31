@@ -473,6 +473,28 @@ export class ProjectService {
 		return this.engine.enqueue({ type: 'delete_project', projectId: p.id, params: { mode } }).id;
 	}
 
+	/** Protection par mot de passe (liste d'accès NPM) des proxy hosts d'un projet de dev ; null si le projet n'en a pas. */
+	async devProtection(p: ProjectRow): Promise<{ enabled: boolean; hosts: number } | null> {
+		const owned = this.s.repos.resources.active({ projectId: p.id });
+		if (!owned.some((r) => r.type === 'npm_access_list')) return null;
+		const ids = new Set(owned.filter((r) => r.type === 'npm_proxy_host').map((r) => Number(r.externalId)));
+		const hosts = (await this.s.proxy.api.listProxyHosts()).filter((h) => ids.has(h.id));
+		if (hosts.length === 0) return null;
+		return { enabled: hosts.some((h) => h.accessListId > 0), hosts: hosts.length };
+	}
+
+	/** Retire (site ouvert à tous) ou remet la liste d'accès sur les proxy hosts du projet, sans toucher aux identifiants. */
+	async setDevProtection(p: ProjectRow, enabled: boolean): Promise<void> {
+		this.#assertNoActiveJob(p);
+		const owned = this.s.repos.resources.active({ projectId: p.id });
+		const list = owned.find((r) => r.type === 'npm_access_list');
+		if (!list) throw new UserFacingError("Ce projet n'a pas de liste d'accès Forge.");
+		const ids = new Set(owned.filter((r) => r.type === 'npm_proxy_host').map((r) => Number(r.externalId)));
+		const hosts = (await this.s.proxy.api.listProxyHosts()).filter((h) => ids.has(h.id));
+		if (hosts.length === 0) throw new UserFacingError('Aucun proxy host de ce projet dans NPM.');
+		for (const h of hosts) await this.s.proxy.setAccessList(h.id, enabled ? Number(list.externalId) : 0);
+	}
+
 	ownedResources(p: ProjectRow) {
 		return this.s.repos.resources.active({ projectId: p.id });
 	}

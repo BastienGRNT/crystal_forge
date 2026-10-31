@@ -259,6 +259,8 @@ export interface NpmProxyHost {
 	forwardHost: string;
 	forwardPort: number;
 	certificateId: number;
+	/** Liste d'accès NPM appliquée (0 = aucune, site ouvert). */
+	accessListId: number;
 	sslForced: boolean;
 	enabled: boolean;
 	nginxOnline: boolean | null;
@@ -317,6 +319,8 @@ export interface NpmApi {
 
 	createProxyHost(payload: NpmCreateProxyHost): Promise<NpmProxyHost>;
 	/** PUT partiel : NPM ne modifie que les champs envoyés et régénère la config nginx. */
+	/** Applique (id) ou retire (0) la liste d'accès d'un proxy host. */
+	setProxyHostAccessList(id: number, accessListId: number): Promise<NpmProxyHost>;
 	updateProxyHost(id: number, patch: { forward_host: string; forward_port: number }): Promise<NpmProxyHost>;
 	deleteProxyHost(id: number): Promise<void>;
 	deleteCertificate(id: number): Promise<void>;

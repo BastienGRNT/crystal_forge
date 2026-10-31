@@ -20,6 +20,7 @@ interface RawHost {
 	forward_host: string;
 	forward_port: number;
 	certificate_id: number;
+	access_list_id?: number;
 	ssl_forced: boolean | number;
 	enabled: boolean | number;
 	meta?: { nginx_online?: boolean; nginx_err?: string | null };
@@ -34,6 +35,7 @@ function toHost(h: RawHost): NpmProxyHost {
 		forwardHost: h.forward_host,
 		forwardPort: h.forward_port,
 		certificateId: h.certificate_id ?? 0,
+		accessListId: h.access_list_id ?? 0,
 		sslForced: !!h.ssl_forced,
 		enabled: !!h.enabled,
 		nginxOnline: h.meta?.nginx_online ?? null,
@@ -119,6 +121,10 @@ export class NpmClient implements NpmApi {
 
 	async updateProxyHost(id: number, patch: { forward_host: string; forward_port: number }) {
 		return toHost(await this.#call<RawHost>('PUT', `/nginx/proxy-hosts/${id}`, patch));
+	}
+
+	async setProxyHostAccessList(id: number, accessListId: number) {
+		return toHost(await this.#call<RawHost>('PUT', `/nginx/proxy-hosts/${id}`, { access_list_id: accessListId }));
 	}
 
 	async deleteProxyHost(id: number) {

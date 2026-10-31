@@ -842,6 +842,7 @@ class FakeNpm implements NpmApi {
 			forwardHost: h.forwardHost,
 			forwardPort: h.forwardPort,
 			certificateId: h.certificateId,
+			accessListId: h.accessListId ?? 0,
 			sslForced: true,
 			enabled: true,
 			nginxOnline: true,
@@ -893,7 +894,7 @@ class FakeNpm implements NpmApi {
 		if (typeof p.certificate_id === 'number' && !reused) throw new ExternalApiError('NPM', `POST /nginx/proxy-hosts : HTTP 400 Certificate ${p.certificate_id} not found`, 400);
 		const certId = reused?.id ?? w.nextNpmId++;
 		if (!reused) w.npmCerts.push({ id: certId, domainNames: p.domain_names, expiresOn: new Date(Date.now() + 90 * 86400_000).toISOString().replace('T', ' ').slice(0, 19) });
-		const host = { id: w.nextNpmId++, domainNames: p.domain_names, forwardHost: p.forward_host, forwardPort: p.forward_port, certificateId: certId };
+		const host = { id: w.nextNpmId++, domainNames: p.domain_names, forwardHost: p.forward_host, forwardPort: p.forward_port, certificateId: certId, accessListId: p.access_list_id ?? 0 };
 		w.npmHosts.push(host);
 		return this.#toHost(host);
 	}
@@ -904,6 +905,14 @@ class FakeNpm implements NpmApi {
 		if (!host) throw new ExternalApiError('NPM', `PUT /nginx/proxy-hosts/${id} : HTTP 404 Not Found`, 404);
 		host.forwardHost = patch.forward_host;
 		host.forwardPort = patch.forward_port;
+		return this.#toHost(host);
+	}
+
+	async setProxyHostAccessList(id: number, accessListId: number) {
+		await delay();
+		const host = world().npmHosts.find((h) => h.id === id);
+		if (!host) throw new ExternalApiError('NPM', `PUT /nginx/proxy-hosts/${id} : HTTP 404 Not Found`, 404);
+		host.accessListId = accessListId;
 		return this.#toHost(host);
 	}
 

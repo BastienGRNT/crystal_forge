@@ -5,6 +5,8 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Archive from '@lucide/svelte/icons/archive';
 	import Unlink from '@lucide/svelte/icons/unlink';
+	import Lock from '@lucide/svelte/icons/lock';
+	import LockOpen from '@lucide/svelte/icons/lock-open';
 	import Save from '@lucide/svelte/icons/save';
 	import SectionCard from '$lib/components/molecules/section-card.svelte';
 	import KeyValue from '$lib/components/molecules/key-value.svelte';
@@ -64,6 +66,32 @@
 			<Button type="submit" form="settings-form" size="sm" disabled={!!data.activeJob}><Save /> Enregistrer</Button>
 		{/snippet}
 	</SectionCard>
+
+	{#if p.environment === 'development'}
+		{#await data.protection then prot}
+			{#if prot}
+				<SectionCard
+					title="Accès au site de dev"
+					description={prot.enabled ? "Le site demande un identifiant et un mot de passe (liste d'accès NPM « dev »)." : "Le site est ouvert à tous, sans mot de passe."}
+					icon={prot.enabled ? Lock : LockOpen}
+				>
+					<p class="text-sm text-muted-foreground">
+						{prot.enabled
+							? "Désactiver retire la liste d'accès des proxy hosts du projet : n'importe qui connaissant l'adresse peut ouvrir le site."
+							: "Réactiver remet la même liste d'accès (identifiants inchangés) sur les proxy hosts du projet."}
+					</p>
+					{#snippet footer()}
+						<form method="POST" action="?/protection" use:enhance>
+							<input type="hidden" name="enabled" value={prot.enabled ? 'false' : 'true'} />
+							<Button type="submit" size="sm" variant={prot.enabled ? 'outline' : 'default'} disabled={!!data.activeJob}>
+								{#if prot.enabled}<LockOpen /> Désactiver la protection{:else}<Lock /> Réactiver la protection{/if}
+							</Button>
+						</form>
+					{/snippet}
+				</SectionCard>
+			{/if}
+		{/await}
+	{/if}
 
 	<SectionCard
 		title="Mettre à niveau le projet"
