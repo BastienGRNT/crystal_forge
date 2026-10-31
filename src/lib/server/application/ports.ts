@@ -330,6 +330,10 @@ export interface NpmApi {
 	createAccessList(name: string, username: string, password: string): Promise<{ id: number }>;
 	/** Passe la liste en « Satisfy Any » (sans règle d'IP, « all » + « deny all » rejette même un bon mot de passe). Les identifiants ne changent pas. */
 	allowPasswordOnly(id: number, name: string): Promise<void>;
+	/** Identifiants (sans mots de passe) de la liste d'accès. */
+	listAccessListUsers(id: number): Promise<string[]>;
+	/** Remplace les identifiants de la liste ; un mot de passe absent conserve celui de l'utilisateur existant. */
+	setAccessListUsers(id: number, name: string, users: { username: string; password?: string }[]): Promise<void>;
 	deleteAccessList(id: number): Promise<void>;
 }
 

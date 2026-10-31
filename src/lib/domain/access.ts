@@ -46,7 +46,7 @@ const TAB_ACTIONS: Record<string, Record<string, AccessLevel | 'admin'>> = {
 	domains: { add: 'edit', repair: 'edit', remove: 'edit' },
 	database: { configure: 'edit', query: 'edit', backup: 'edit', import: 'edit', restore: 'edit' },
 	container: { power: 'edit', resize: 'admin', firewall: 'admin' },
-	settings: { update: 'admin', upgrade: 'admin', delete: 'admin', protection: 'admin' }
+	settings: { update: 'admin', upgrade: 'admin', delete: 'admin', protection: 'admin', accessUsers: 'admin' }
 };
 
 /** Niveau exigé pour AFFICHER un onglet de projet (« read » par défaut). */

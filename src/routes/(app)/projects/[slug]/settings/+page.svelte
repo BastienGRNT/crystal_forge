@@ -91,6 +91,26 @@
 				</SectionCard>
 			{/if}
 		{/await}
+		{#await data.accessUsers then users}
+			{#if users}
+				<SectionCard title="Identifiants du site de dev" description="Un mot de passe vide laisse celui de l'identifiant inchangé. Ajoutez une personne en remplissant la dernière ligne." icon={Lock}>
+					<form id="access-users-form" method="POST" action="?/accessUsers" use:enhance class="space-y-2">
+						{#each [...users, ''] as u, i (i)}
+							<div class="grid items-center gap-2 sm:grid-cols-[1fr_1fr_auto]">
+								<Input name="username" value={u} readonly={u !== ''} placeholder="Nouvel identifiant" class="font-mono" autocomplete="off" />
+								<Input name="password" type="password" placeholder={u ? 'Nouveau mot de passe (optionnel)' : 'Mot de passe (8 caractères min.)'} autocomplete="new-password" />
+								{#if u}
+									<label class="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" name="remove" value={u} /> Retirer</label>
+								{:else}<span></span>{/if}
+							</div>
+						{/each}
+					</form>
+					{#snippet footer()}
+						<Button type="submit" form="access-users-form" size="sm" disabled={!!data.activeJob}><Save /> Enregistrer les identifiants</Button>
+					{/snippet}
+				</SectionCard>
+			{/if}
+		{/await}
 	{/if}
 
 	<SectionCard

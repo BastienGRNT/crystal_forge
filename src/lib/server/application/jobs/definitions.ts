@@ -65,7 +65,11 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
 	redeploy: {
 		type: 'redeploy',
 		label: 'Redéploiement',
-		steps: () => ['pipeline']
+		steps: () => ['pipeline'],
+		// Un redéploiement réussi remet en service un projet resté en erreur après un échec du déploiement initial.
+		onSuccess: (ctx) => {
+			if (ctx.project().status === 'error') setStatus('active')(ctx);
+		}
 	},
 	update_env: {
 		type: 'update_env',

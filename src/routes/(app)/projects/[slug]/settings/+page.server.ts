@@ -9,7 +9,8 @@ export const load: PageServerLoad = ({ params }) => {
 	const resources = f.projects.ownedResources(p).map((r) => ({ type: r.type, externalId: r.externalId, meta: JSON.parse(r.meta) as Record<string, unknown> }));
 	// Comparaison avec ce que Forge produirait aujourd'hui (GitHub, Proxmox, SSH) : en différé.
 	const protection = p.environment === 'development' ? f.projects.devProtection(p).catch(() => null) : Promise.resolve(null);
-	return { resources, upgrade: f.upgrade.view(p), protection };
+	const accessUsers = p.environment === 'development' ? f.projects.devAccessUsers(p).catch(() => null) : Promise.resolve(null);
+	return { resources, upgrade: f.upgrade.view(p), protection, accessUsers };
 };
 
 export const actions: Actions = {
@@ -48,6 +49,20 @@ export const actions: Actions = {
 			return fail(400, { error: errorMessage(err) });
 		}
 		return { protectionDone: true };
+	},
+	accessUsers: async ({ params, request }) => {
+		const f = forge();
+		const d = await request.formData();
+		const names = d.getAll('username').map(String);
+		const passes = d.getAll('password').map(String);
+		const removed = new Set(d.getAll('remove').map(String));
+		const users = names.map((username, i) => ({ username: username.trim(), password: passes[i] ?? '' })).filter((u) => u.username && !removed.has(u.username));
+		try {
+			await f.projects.saveDevAccessUsers(f.projects.get(params.slug), users);
+		} catch (err) {
+			return fail(400, { error: errorMessage(err) });
+		}
+		return { accessUsersDone: true };
 	},
 	delete: async ({ params, request }) => {
 		const f = forge();

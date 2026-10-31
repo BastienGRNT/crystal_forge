@@ -946,6 +946,18 @@ class FakeNpm implements NpmApi {
 		await delay();
 	}
 
+	#aclUsers = new Map<number, string[]>();
+
+	async listAccessListUsers(id: number) {
+		await delay();
+		return this.#aclUsers.get(id) ?? ['dev'];
+	}
+
+	async setAccessListUsers(id: number, _name: string, users: { username: string; password?: string }[]) {
+		await delay();
+		this.#aclUsers.set(id, users.map((u) => u.username));
+	}
+
 	async deleteAccessList(_id: number) {
 		await delay();
 	}

@@ -209,6 +209,16 @@ export class NpmClient implements NpmApi {
 		await this.#call('PUT', `/nginx/access-lists/${id}`, { name, satisfy_any: true, pass_auth: false });
 	}
 
+	async listAccessListUsers(id: number) {
+		const r = await this.#call<{ items?: { username: string }[] }>('GET', `/nginx/access-lists/${id}?expand=items`);
+		return (r.items ?? []).map((i) => i.username);
+	}
+
+	async setAccessListUsers(id: number, name: string, users: { username: string; password?: string }[]) {
+		const items = users.map((u) => (u.password ? { username: u.username, password: u.password } : { username: u.username }));
+		await this.#call('PUT', `/nginx/access-lists/${id}`, { name, satisfy_any: true, pass_auth: false, items });
+	}
+
 	async deleteAccessList(id: number) {
 		await this.#call('DELETE', `/nginx/access-lists/${id}`);
 	}

@@ -495,6 +495,34 @@ export class ProjectService {
 		for (const h of hosts) await this.s.proxy.setAccessList(h.id, enabled ? Number(list.externalId) : 0);
 	}
 
+	/** Identifiants de la liste d'accès du projet (jamais les mots de passe) ; null s'il n'y en a pas. */
+	async devAccessUsers(p: ProjectRow): Promise<string[] | null> {
+		const list = this.s.repos.resources.active({ projectId: p.id }).find((r) => r.type === 'npm_access_list');
+		return list ? this.s.proxy.listAccessListUsers(Number(list.externalId)) : null;
+	}
+
+	/** `users` : liste complète voulue ; mot de passe vide = inchangé (obligatoire pour un nouvel identifiant). */
+	async saveDevAccessUsers(p: ProjectRow, users: { username: string; password: string }[]): Promise<void> {
+		this.#assertNoActiveJob(p);
+		const list = this.s.repos.resources.active({ projectId: p.id }).find((r) => r.type === 'npm_access_list');
+		if (!list) throw new UserFacingError("Ce projet n'a pas de liste d'accès Forge.");
+		if (users.length === 0) throw new UserFacingError('Gardez au moins un identifiant (ou désactivez la protection).');
+		const existing = new Set(await this.s.proxy.listAccessListUsers(Number(list.externalId)));
+		const seen = new Set<string>();
+		for (const u of users) {
+			if (!/^[A-Za-z0-9._-]{1,32}$/.test(u.username)) throw new UserFacingError(`Identifiant « ${u.username} » invalide (lettres, chiffres, . _ -, 32 max).`);
+			if (seen.has(u.username)) throw new UserFacingError(`Identifiant « ${u.username} » en double.`);
+			seen.add(u.username);
+			if (!existing.has(u.username) && u.password.length < 8) throw new UserFacingError(`Mot de passe de « ${u.username} » : 8 caractères minimum.`);
+			if (u.password && u.password.length < 8) throw new UserFacingError(`Mot de passe de « ${u.username} » : 8 caractères minimum.`);
+		}
+		await this.s.proxy.setAccessListUsers(
+			Number(list.externalId),
+			`Forge — ${p.slug}`,
+			users.map((u) => ({ username: u.username, password: u.password || undefined }))
+		);
+	}
+
 	ownedResources(p: ProjectRow) {
 		return this.s.repos.resources.active({ projectId: p.id });
 	}

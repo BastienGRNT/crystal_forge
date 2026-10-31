@@ -783,6 +783,21 @@ export class ProxyGateway {
 		});
 	}
 
+	listAccessListUsers(id: number) {
+		return this.api.listAccessListUsers(id);
+	}
+
+	setAccessListUsers(id: number, name: string, users: { username: string; password?: string }[]) {
+		return this.#run({
+			system: 'npm',
+			action: 'access-list.update',
+			summary: `Liste d'accès #${id} : identifiants ${users.map((u) => u.username).join(', ')}`,
+			check: () => assertOwned('npm_access_list', id, this.d.ownership.owned('npm_access_list'), "La liste d'accès"),
+			execute: () => this.api.setAccessListUsers(id, name, users),
+			simulate: () => undefined
+		});
+	}
+
 	deleteAccessList(id: number) {
 		return this.#run({
 			system: 'npm',
