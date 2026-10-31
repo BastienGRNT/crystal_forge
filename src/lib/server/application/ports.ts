@@ -324,6 +324,8 @@ export interface NpmApi {
 	createDnsCertificate(input: { domain: string; email: string; ovh: OvhDnsCredentials }): Promise<NpmCertificate>;
 	/** Liste d'accès NPM protégée par un identifiant et un mot de passe (authentification basique). */
 	createAccessList(name: string, username: string, password: string): Promise<{ id: number }>;
+	/** Passe la liste en « Satisfy Any » (sans règle d'IP, « all » + « deny all » rejette même un bon mot de passe). Les identifiants ne changent pas. */
+	allowPasswordOnly(id: number, name: string): Promise<void>;
 	deleteAccessList(id: number): Promise<void>;
 }
 

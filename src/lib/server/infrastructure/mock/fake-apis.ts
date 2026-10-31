@@ -933,6 +933,10 @@ class FakeNpm implements NpmApi {
 		return { id: world().nextNpmId++ };
 	}
 
+	async allowPasswordOnly(_id: number, _name: string) {
+		await delay();
+	}
+
 	async deleteAccessList(_id: number) {
 		await delay();
 	}

@@ -755,6 +755,17 @@ export class ProxyGateway {
 		});
 	}
 
+	allowPasswordOnly(id: number, name: string) {
+		return this.#run({
+			system: 'npm',
+			action: 'access-list.update',
+			summary: `Liste d'accès #${id} : « Satisfy Any » (mot de passe seul, identifiants inchangés)`,
+			check: () => assertOwned('npm_access_list', id, this.d.ownership.owned('npm_access_list'), "La liste d'accès"),
+			execute: () => this.api.allowPasswordOnly(id, name),
+			simulate: () => undefined
+		});
+	}
+
 	deleteAccessList(id: number) {
 		return this.#run({
 			system: 'npm',

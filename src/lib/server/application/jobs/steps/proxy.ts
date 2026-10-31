@@ -44,8 +44,11 @@ export const proxyStep: StepDefinition = {
 		let accessListId: number | undefined;
 		if (p.environment === 'development') {
 			const ownedList = repos.resources.active({ projectId: p.id }).find((x) => x.type === 'npm_access_list');
-			if (ownedList) accessListId = Number(ownedList.externalId);
-			else {
+			if (ownedList) {
+				accessListId = Number(ownedList.externalId);
+				// Listes créées par une ancienne version de Forge : le mot de passe seul donnait 403.
+				await proxy.allowPasswordOnly(accessListId, `Forge — ${p.slug}`);
+			} else {
 				const username = 'dev';
 				const password = randomBytes(12).toString('base64url');
 				const list = await proxy.createAccessList(`Forge — ${p.slug}`, username, password);

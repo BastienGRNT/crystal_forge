@@ -198,6 +198,11 @@ export class NpmClient implements NpmApi {
 		return { id: r.id };
 	}
 
+	async allowPasswordOnly(id: number, name: string) {
+		// Sans « items » : NPM garde l'utilisateur et son mot de passe.
+		await this.#call('PUT', `/nginx/access-lists/${id}`, { name, satisfy_any: true, pass_auth: false });
+	}
+
 	async deleteAccessList(id: number) {
 		await this.#call('DELETE', `/nginx/access-lists/${id}`);
 	}
