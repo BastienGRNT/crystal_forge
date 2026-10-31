@@ -193,7 +193,8 @@ export class NpmClient implements NpmApi {
 	}
 
 	async createAccessList(name: string, username: string, password: string) {
-		const r = await this.#call<{ id: number }>('POST', '/nginx/access-lists', { name, satisfy_any: false, pass_auth: false, items: [{ username, password }], clients: [] });
+		// satisfy_any: sans règle d'IP, NPM ajoute un « deny all » : avec « satisfy all » le mot de passe ne suffit pas (403 partout).
+		const r = await this.#call<{ id: number }>('POST', '/nginx/access-lists', { name, satisfy_any: true, pass_auth: false, items: [{ username, password }], clients: [] });
 		return { id: r.id };
 	}
 
