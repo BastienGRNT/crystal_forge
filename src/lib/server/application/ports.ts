@@ -187,6 +187,8 @@ export interface GithubApi {
 	whoami(): Promise<{ login: string; tokenExpiresAt: string | null }>;
 	listRepos(): Promise<GhRepo[]>;
 	getRepo(owner: string, repo: string): Promise<GhRepo>;
+	/** Le compte GitHub est-il collaborateur du dépôt (GET /repos/{o}/{r}/collaborators/{login} : 204 / 404) ? */
+	isCollaborator(owner: string, repo: string, login: string): Promise<boolean>;
 	listDir(owner: string, repo: string, path: string, ref?: string): Promise<GhDirEntry[]>;
 	/** Arborescence complète d'une branche en un appel ; truncated : dépôt trop gros, lister dossier par dossier. */
 	listTree(owner: string, repo: string, ref: string): Promise<{ entries: TreeEntry[]; truncated: boolean }>;

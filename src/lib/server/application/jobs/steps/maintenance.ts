@@ -1,5 +1,6 @@
 /** Étapes de maintenance : alimentation, retrait de domaine, suppression de projet, rollback. */
 import { FORGE_ZFS_STORAGE, rootfsStorage } from '$lib/domain/storage';
+import { ADMIN_APPROVAL_KEY } from '$lib/domain/access';
 import { ExternalApiError } from '$lib/domain/errors';
 import { FORGE_SECRET_NAME } from '$lib/domain/safety-policy';
 import type { ResourceRow } from '$server/infrastructure/db/schema';
@@ -147,6 +148,24 @@ export const powerStep: StepDefinition = {
 		const upid = await ctx.services.proxmox.power(p.ctid, action);
 		await ctx.services.proxmox.waitTask(upid, { timeoutMs: 3 * 60_000 });
 		ctx.log('success', `Action « ${action} » terminée sur le CT ${p.ctid}.`);
+	}
+};
+
+/** Projet créé par un collaborateur : rien n'est créé tant qu'un admin n'a pas validé. */
+export const approvalStep: StepDefinition = {
+	key: 'approval',
+	label: 'Validation par un admin',
+	async run(ctx) {
+		if (ctx.confirmed(ADMIN_APPROVAL_KEY)) {
+			ctx.log('success', 'Création validée par un admin.');
+			return;
+		}
+		const p = ctx.project();
+		ctx.awaitInput({
+			kind: ADMIN_APPROVAL_KEY,
+			title: `Valider la création de « ${p.name} » demandée par ${String(ctx.params.requestedBy ?? 'un collaborateur')} ?`,
+			payload: { repo: `${p.repoOwner}/${p.repoName}`, branch: p.branch, size: p.size, environment: p.environment }
+		});
 	}
 };
 

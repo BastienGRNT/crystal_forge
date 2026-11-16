@@ -33,6 +33,7 @@ function authorize(user: SessionUser, event: RequestEvent): Response | null {
 	const req = requirementFor(event.request.method, event.url.pathname, event.url.search);
 	let allowed = false;
 	if (req.kind === 'any') allowed = true;
+	else if (req.kind === 'creator') allowed = f.auth.canCreateProjects(user);
 	else if (req.kind === 'project' || req.kind === 'job') {
 		let projectId: number | null | undefined;
 		if (req.kind === 'project') {

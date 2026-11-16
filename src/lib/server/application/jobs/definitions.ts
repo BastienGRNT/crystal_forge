@@ -14,6 +14,7 @@ import {
 	backupStep,
 	destroyCtStep,
 	finalizeStep,
+	approvalStep,
 	moveStorageStep,
 	powerStep,
 	removeDomainStep,
@@ -42,6 +43,7 @@ export const STEPS: Record<string, StepDefinition> = Object.fromEntries(
 		pipelineStep,
 		powerStep,
 		moveStorageStep,
+		approvalStep,
 		removeDomainStep,
 		backupStep,
 		teardownGithubStep,
@@ -61,7 +63,7 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
 	deploy: {
 		type: 'deploy',
 		label: 'Déploiement initial',
-		steps: () => ['ct', 'firewall', 'runner', 'secrets', 'workflow', 'dns', 'npm', 'pipeline'],
+		steps: (p) => [...(p.needsApproval ? ['approval'] : []), 'ct', 'firewall', 'runner', 'secrets', 'workflow', 'dns', 'npm', 'pipeline'],
 		onStart: setStatus('deploying'),
 		onSuccess: setStatus('active'),
 		onFailure: setStatus('error')

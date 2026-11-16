@@ -4,13 +4,14 @@ import { detectDeployMode, normalizeWorkdir, repoPath, type DetectionResult } fr
 import { analyzeCompose, type ComposeAnalysis } from '$lib/domain/compose-analysis';
 import { ENV_TEMPLATE_FILES, parseEnvTemplate, type EnvTemplate } from '$lib/domain/env-template';
 import { buildFqdn, isValidSubdomain, normalizeSubdomain, servesDomain } from '$lib/domain/domain-name';
-import { errorMessage } from '$lib/domain/errors';
+import { errorMessage, UserFacingError } from '$lib/domain/errors';
 import { assessHostRam, committedMemoryMb, hostMemoryInUse, SIZES, type SizeKey } from '$lib/domain/sizes';
 import { workflowPathFor, type Environment } from '$lib/domain/environments';
 import { findSelfHostedWorkflows, WORKFLOW_PATH, type SelfHostedUsage } from '$lib/domain/workflow';
 import { childrenOf } from '$lib/domain/repo-tree';
 import type { GhDirEntry, GhRepo } from '../ports';
 import type { ForgeServices } from '../services';
+import type { AuthService, SessionUser } from './auth';
 
 export interface RepoInspection {
 	repo: GhRepo;
@@ -34,7 +35,10 @@ const SKIP_DIRS = new Set(['.github', 'node_modules', '.git', 'docs', 'doc', '.v
 export class WizardService {
 	#repos: { at: number; list: GhRepo[] } | null = null;
 
-	constructor(private readonly s: ForgeServices) {}
+	constructor(
+		private readonly s: ForgeServices,
+		private readonly auth: Pick<AuthService, 'creatorLimits'>
+	) {}
 
 	async listRepos(force = false): Promise<GhRepo[]> {
 		if (!force && this.#repos && Date.now() - this.#repos.at < 60_000) return this.#repos.list;
@@ -43,8 +47,40 @@ export class WizardService {
 		return list;
 	}
 
-	async inspect(fullName: string, workdirInput?: string, branchInput?: string): Promise<RepoInspection> {
+	/** Dépôts proposés à un collaborateur : ceux où son compte GitHub est collaborateur. */
+	async listReposFor(user: SessionUser, force = false): Promise<GhRepo[]> {
+		const all = await this.listRepos(force);
+		const limits = this.auth.creatorLimits(user);
+		if (!limits) return all;
+		const login = limits.githubLogin;
+		if (!limits.canCreate || !login) return [];
+		const out: GhRepo[] = [];
+		for (let i = 0; i < all.length; i += 8) {
+			const batch = all.slice(i, i + 8);
+			const ok = await Promise.all(batch.map((r) => this.repoAllowed(user, r.owner, r.name).catch(() => false)));
+			out.push(...batch.filter((_, j) => ok[j]));
+		}
+		return out;
+	}
+
+	readonly #access = new Map<string, { at: number; ok: boolean }>();
+
+	/** Un collaborateur n'agit que sur les dépôts dont son compte GitHub est collaborateur (gardé 5 min). */
+	async repoAllowed(user: SessionUser, owner: string, name: string): Promise<boolean> {
+		const limits = this.auth.creatorLimits(user);
+		if (!limits) return true;
+		if (!limits.canCreate || !limits.githubLogin) return false;
+		const key = `${limits.githubLogin}:${owner}/${name}`.toLowerCase();
+		const hit = this.#access.get(key);
+		if (hit && Date.now() - hit.at < 5 * 60_000) return hit.ok;
+		const ok = await this.s.github.api.isCollaborator(owner, name, limits.githubLogin);
+		this.#access.set(key, { at: Date.now(), ok });
+		return ok;
+	}
+
+	async inspect(fullName: string, workdirInput?: string, branchInput?: string, user?: SessionUser): Promise<RepoInspection> {
 		const [owner, name] = fullName.split('/') as [string, string];
+		if (user && !(await this.repoAllowed(user, owner ?? '', name ?? ''))) throw new UserFacingError('Dépôt non accessible à votre compte GitHub.');
 		const api = this.s.github.api;
 		const repo = await api.getRepo(owner, name);
 		const workdir = normalizeWorkdir(workdirInput);

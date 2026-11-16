@@ -53,7 +53,7 @@
 <div class="flex h-full flex-col gap-4 p-3">
 	<a href={isAdmin ? '/' : '/projects'} class="flex h-10 items-center px-2" onclick={onNavigate}><Logo /></a>
 
-	{#if isAdmin}
+	{#if isAdmin || page.data.user?.canCreate}
 		<Button href="/projects/new" class="mx-1 justify-start gap-2 bg-ember text-ember-foreground hover:bg-ember/90" onclick={onNavigate}>
 			<Plus />
 			Nouveau projet

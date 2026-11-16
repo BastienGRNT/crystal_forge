@@ -18,5 +18,5 @@ export const load: LayoutServerLoad = async ({ depends, locals }) => {
 	const activeJobs = f.repos.jobs
 		.byStatus(['queued', 'running', 'awaiting_input', 'rolling_back'])
 		.filter((j) => !ids || (j.projectId != null && ids.has(j.projectId))).length;
-	return { user: { username: user.username, role: user.role }, mode: f.config.mode, dryRun: f.isDryRun(), host, projects, activeJobs };
+	return { user: { username: user.username, role: user.role, canCreate: f.auth.canCreateProjects(user) }, mode: f.config.mode, dryRun: f.isDryRun(), host, projects, activeJobs };
 };

@@ -17,7 +17,9 @@ import { envAad, type ForgeServices } from '../services';
 import { runnerRepoDir, sizeOf } from '../jobs/steps/common';
 import { analyzeCompose, type DbKind } from '$lib/domain/compose-analysis';
 import { checkEnvAgainst, type ComposeEnvRef } from '$lib/domain/env-template';
-import { findEnvTemplate } from './wizard';
+import { findEnvTemplate, type WizardService } from './wizard';
+import type { AuthService, SessionUser } from './auth';
+import { creatorQuotaErrors } from '$lib/domain/creator';
 import { firewallPlan } from '../jobs/steps/firewall';
 
 export interface DomainInput {
@@ -49,7 +51,9 @@ export interface CreateProjectInput {
 export class ProjectService {
 	constructor(
 		private readonly s: ForgeServices,
-		private readonly engine: JobEngine
+		private readonly engine: JobEngine,
+		private readonly auth: Pick<AuthService, 'creatorLimits' | 'setMember'>,
+		private readonly wizard: Pick<WizardService, 'repoAllowed'>
 	) {}
 
 	get(slug: string): ProjectRow {
@@ -63,9 +67,19 @@ export class ProjectService {
 		if (active) throw new UserFacingError(`Un job est déjà en cours pour ce projet (#${active.id}). Attendez sa fin.`);
 	}
 
-	async create(input: CreateProjectInput): Promise<{ project: ProjectRow; jobId: number }> {
+	async create(input: CreateProjectInput, creator?: SessionUser): Promise<{ project: ProjectRow; jobId: number }> {
 		const { repos, github, settings, proxmox } = this.s;
 		const errors: string[] = [];
+		// Collaborateur : quotas, zones et dépôt vérifiés ici, à chaque création (P6).
+		const limits = creator ? this.auth.creatorLimits(creator) : null;
+		if (creator && limits) {
+			const owned = repos.projects.list().filter((p) => p.ownerId === creator.id && p.status !== 'deleted');
+			const requested = isSizeKey(input.size) ? SIZES[input.size].memoryMb : Infinity;
+			errors.push(...creatorQuotaErrors(limits, owned.map((p) => ({ memoryMb: sizeOf(p).memoryMb })), { memoryMb: requested, zones: input.domains.map((d) => d.zone) }));
+			const [o, r] = input.repo.split('/');
+			if (!errors.length && o && r && !(await this.wizard.repoAllowed(creator, o, r))) errors.push(`Votre compte GitHub (${limits.githubLogin}) n'est pas collaborateur de ${input.repo}.`);
+			if (errors.length) throw new UserFacingError(errors.join('\n'));
+		}
 
 		const name = input.name.trim() || input.repo.split('/')[1] || '';
 		const environment: Environment = input.environment ?? 'production';
@@ -182,15 +196,18 @@ export class ProjectService {
 			postDeploy: postDeploy || null,
 			...(db ?? {}),
 			size,
-			status: 'draft'
+			status: 'draft',
+			ownerId: limits && creator ? creator.id : null
 		});
+		// Le créateur gère son projet (niveau « édition ») ; les réglages sensibles restent à l'admin.
+		if (limits && creator) this.auth.setMember(creator.id, project.id, 'edit');
 		repos.projects.update(project.id, {
 			envEncrypted: env.normalized.trim() ? this.s.cipher.encrypt(env.normalized, envAad(project.id)) : null,
 			envUpdatedAt: Date.now()
 		});
 		for (const d of domains) repos.domains.create({ projectId: project.id, ...d, status: 'pending' });
 
-		const job = this.engine.enqueue({ type: 'deploy', projectId: project.id });
+		const job = this.engine.enqueue({ type: 'deploy', projectId: project.id, params: limits?.requiresApproval ? { needsApproval: true, requestedBy: creator?.username } : {} });
 		return { project: repos.projects.get(project.id) as ProjectRow, jobId: job.id };
 	}
 

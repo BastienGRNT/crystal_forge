@@ -1,6 +1,7 @@
 import { error, fail } from '@sveltejs/kit';
 import { forge } from '$server/container';
 import { errorMessage } from '$lib/domain/errors';
+import { ADMIN_APPROVAL_KEY } from '$lib/domain/access';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = ({ params }) => {
@@ -27,8 +28,10 @@ export const actions: Actions = {
 	resume: act((id) => forge().engine.resume(id)),
 	interrupt: act((id) => forge().engine.interrupt(id)),
 	rollback: act((id) => ({ rollbackJobId: forge().engine.cancelWithRollback(id).id })),
-	confirm: async ({ params, request }) => {
+	confirm: async ({ params, request, locals }) => {
 		const key = String((await request.formData()).get('key') ?? '');
+		// Valider un projet demandé par un collaborateur : admin seulement (le demandeur a « deploy » sur ce job).
+		if (key === ADMIN_APPROVAL_KEY && locals.user?.role !== 'admin') return fail(403, { error: 'Seul un administrateur peut valider cette création.' });
 		try {
 			forge().engine.confirm(Number(params.id), key);
 			return { ok: true };

@@ -48,6 +48,23 @@ export const actions: Actions = {
 		}
 		return { saved: true };
 	},
+	/** Droit de créer des projets, avec ses limites. */
+	creator: async ({ request }) => {
+		const d = await request.formData();
+		try {
+			forge().auth.setCreatorLimits(id(d, 'userId'), {
+				canCreate: d.get('canCreate') === 'on',
+				maxProjects: Number(d.get('maxProjects')),
+				maxRamMb: Number(d.get('maxRamMb')),
+				allowedZones: String(d.get('allowedZones') ?? ''),
+				githubLogin: String(d.get('githubLogin') ?? ''),
+				requiresApproval: d.get('requiresApproval') === 'on'
+			});
+		} catch (err) {
+			return fail(400, { error: errorMessage(err) });
+		}
+		return { saved: true };
+	},
 	toggle: async ({ request }) => {
 		const d = await request.formData();
 		try {

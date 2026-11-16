@@ -3,7 +3,7 @@ import type { ResourceType } from '$lib/domain/safety-policy';
 import type { ForgeServices } from '../services';
 
 export interface PendingInput {
-	kind: 'workflow' | 'workflow_update' | 'manual_dns';
+	kind: 'workflow' | 'workflow_update' | 'manual_dns' | 'admin_approval';
 	title: string;
 	payload: Record<string, unknown>;
 }

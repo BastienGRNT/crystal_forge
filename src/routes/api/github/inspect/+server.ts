@@ -3,10 +3,10 @@ import { forge } from '$server/container';
 import { errorMessage } from '$lib/domain/errors';
 import type { RequestHandler } from './$types';
 
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url, locals }) => {
 	const repo = url.searchParams.get('repo') ?? '';
 	try {
-		return json(await forge().wizard.inspect(repo, url.searchParams.get('workdir') ?? '.', url.searchParams.get('branch') ?? undefined));
+		return json(await forge().wizard.inspect(repo, url.searchParams.get('workdir') ?? '.', url.searchParams.get('branch') ?? undefined, locals.user ?? undefined));
 	} catch (err) {
 		return json({ error: errorMessage(err) }, { status: 400 });
 	}

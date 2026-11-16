@@ -315,6 +315,9 @@ export class AuthRepo {
 	setDisabled(userId: number, disabled: boolean): void {
 		this.db.update(users).set({ disabled, updatedAt: ts() }).where(eq(users.id, userId)).run();
 	}
+	setCreatorLimits(userId: number, patch: Partial<Pick<UserRow, 'canCreateProjects' | 'maxProjects' | 'maxRamMb' | 'allowedZones' | 'githubLogin' | 'requiresApproval'>>): void {
+		this.db.update(users).set({ ...patch, updatedAt: ts() }).where(eq(users.id, userId)).run();
+	}
 	deleteUser(userId: number): void {
 		this.db.delete(users).where(eq(users.id, userId)).run();
 	}

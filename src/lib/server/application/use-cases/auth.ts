@@ -2,6 +2,7 @@
  * Authentification : comptes (un admin, des collaborateurs), mot de passe argon2id,
  * sessions opaques (seul leur SHA-256 est stocké), droits par projet.
  */
+import { isGithubLogin, parseZones, type CreatorLimits } from '$lib/domain/creator';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { AuthRepo } from '$server/infrastructure/db/repositories';
 import { hashPassword, validatePasswordStrength, verifyPassword } from '$server/infrastructure/crypto/password';
@@ -25,6 +26,7 @@ export interface SessionUser {
 
 export interface UserView extends SessionUser {
 	disabled: boolean;
+	creator: CreatorLimits & { requiresApproval: boolean };
 	createdAt: number;
 	projects: { projectId: number; level: AccessLevel }[];
 }
@@ -158,6 +160,40 @@ export class AuthService {
 		return new Set(this.repo.membershipsOf(user.id).map((m) => m.projectId));
 	}
 
+	#limits(u: { canCreateProjects: boolean; maxProjects: number; maxRamMb: number; allowedZones: string; githubLogin: string | null }): CreatorLimits {
+		return { canCreate: u.canCreateProjects, maxProjects: u.maxProjects, maxRamMb: u.maxRamMb, allowedZones: parseZones(u.allowedZones), githubLogin: u.githubLogin };
+	}
+
+	/** Droits de création d'un compte (null : admin, sans limite). */
+	creatorLimits(user: SessionUser): (CreatorLimits & { requiresApproval: boolean }) | null {
+		if (user.role === 'admin') return null;
+		const u = this.repo.userById(user.id);
+		if (!u || u.disabled) return { canCreate: false, maxProjects: 0, maxRamMb: 0, allowedZones: [], githubLogin: null, requiresApproval: true };
+		return { ...this.#limits(u), requiresApproval: u.requiresApproval };
+	}
+
+	canCreateProjects(user: SessionUser): boolean {
+		return user.role === 'admin' || !!this.creatorLimits(user)?.canCreate;
+	}
+
+	/** Réglage des droits de création d'un collaborateur (admin). */
+	setCreatorLimits(userId: number, input: { canCreate: boolean; maxProjects: number; maxRamMb: number; allowedZones: string; githubLogin: string; requiresApproval: boolean }): void {
+		const user = this.#target(userId);
+		if (user.role === 'admin') throw new UserFacingError("L'admin n'a pas de quota.");
+		const login = input.githubLogin.trim();
+		if (login && !isGithubLogin(login)) throw new UserFacingError(`Compte GitHub invalide : ${login}`);
+		if (!Number.isInteger(input.maxProjects) || input.maxProjects < 0 || input.maxProjects > 50) throw new UserFacingError('Nombre de projets : entre 0 et 50.');
+		if (!Number.isInteger(input.maxRamMb) || input.maxRamMb < 0 || input.maxRamMb > 65536) throw new UserFacingError('RAM : entre 0 et 65 536 Mo.');
+		this.repo.setCreatorLimits(userId, {
+			canCreateProjects: input.canCreate,
+			maxProjects: input.maxProjects,
+			maxRamMb: input.maxRamMb,
+			allowedZones: parseZones(input.allowedZones).join(','),
+			githubLogin: login || null,
+			requiresApproval: input.requiresApproval
+		});
+	}
+
 	// --- Gestion des comptes (admin) ---
 
 	listUsers(): UserView[] {
@@ -167,6 +203,7 @@ export class AuthService {
 			username: u.username,
 			role: u.role,
 			disabled: u.disabled,
+			creator: { ...this.#limits(u), requiresApproval: u.requiresApproval },
 			createdAt: u.createdAt,
 			projects: members.filter((m) => m.userId === u.id).map((m) => ({ projectId: m.projectId, level: m.level }))
 		}));

@@ -4,14 +4,18 @@ import { errorMessage, RamTightError, UserFacingError } from '$lib/domain/errors
 import type { DomainInput } from '$server/application/use-cases/projects';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ url }) => {
+export const load: PageServerLoad = async ({ url, locals }) => {
 	const f = forge();
-	// « Ajouter un serveur dev » depuis un projet existant : dépôt, dossier et port repris.
-	const from = url.searchParams.get('from');
+	const limits = locals.user ? f.auth.creatorLimits(locals.user) : null;
+	// « Ajouter un serveur dev » depuis un projet existant : dépôt, dossier et port repris (admin seulement).
+	const from = limits ? null : url.searchParams.get('from');
 	const source = from ? f.repos.projects.bySlug(from) : undefined;
 	const zones = await f.wizard.zones();
+	// Un collaborateur ne voit que les zones DNS qu'on lui a ouvertes.
+	const allowed = limits ? zones.zones.filter((z) => limits.allowedZones.includes(z)) : zones.zones;
 	return {
-		zones: zones.zones,
+		limits: limits && { maxProjects: limits.maxProjects, maxRamMb: limits.maxRamMb, requiresApproval: limits.requiresApproval },
+		zones: allowed,
 		zonesError: zones.error,
 		owner: f.settings.get('github.owner'),
 		publicIp: f.settings.get('network.publicIp'),
@@ -21,7 +25,7 @@ export const load: PageServerLoad = async ({ url }) => {
 };
 
 export const actions: Actions = {
-	default: async ({ request }) => {
+	default: async ({ request, locals }) => {
 		const d = await request.formData();
 		const get = (k: string) => String(d.get(k) ?? '');
 		let domains: DomainInput[] = [];
@@ -47,7 +51,7 @@ export const actions: Actions = {
 				acknowledgeRam: get('acknowledgeRam') === 'on',
 				environment: get('environment') === 'development' ? 'development' : 'production',
 				branch: get('branch')
-			});
+			}, locals.user?.role === 'admin' ? undefined : (locals.user ?? undefined));
 			jobId = res.jobId;
 		} catch (err) {
 			// L'aperçu peut avoir vu plus de RAM libre que la création : la case de confirmation doit apparaître.

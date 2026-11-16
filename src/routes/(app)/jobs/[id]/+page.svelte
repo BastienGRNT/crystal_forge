@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import DiffView from '$lib/components/molecules/diff-view.svelte';
 	import { lineDiff } from '$lib/domain/diff';
 	import { onMount, untrack } from 'svelte';
@@ -200,6 +201,29 @@
 				<Alert.Title>Échec{failedStep ? ` à l'étape « ${failedStep.label} »` : ''}</Alert.Title>
 				<Alert.Description class="break-words whitespace-pre-line">{job.error}</Alert.Description>
 			</Alert.Root>
+		{/if}
+
+		{#if job.status === 'awaiting_input' && pending?.kind === 'admin_approval'}
+			<SectionCard title={pending.title} description="Un collaborateur a demandé ce projet. Rien n'est créé (CT, DNS, GitHub) tant qu'un admin n'a pas validé." icon={ShieldAlert} class="border-warning/40">
+				<p class="font-mono text-sm">{pending.payload.repo}@{pending.payload.branch} · taille {pending.payload.size} · {pending.payload.environment === 'development' ? 'DEV' : 'PROD'}</p>
+				{#snippet footer()}
+					{#if page.data.user?.role === 'admin'}
+						<Button variant="ghost" size="sm" onclick={() => (rollbackOpen = true)}>Refuser</Button>
+						<form method="POST" action="?/confirm" use:enhance={() => {
+							busy = 'confirm';
+							return async ({ update }) => {
+								await update();
+								busy = null;
+							};
+						}}>
+							<input type="hidden" name="key" value="admin_approval" />
+							<Button type="submit" size="sm" disabled={busy !== null}>{#if busy === 'confirm'}<Spinner />{/if} Valider la création</Button>
+						</form>
+					{:else}
+						<span class="text-sm text-muted-foreground">En attente de validation par un administrateur.</span>
+					{/if}
+				{/snippet}
+			</SectionCard>
 		{/if}
 
 		{#if job.status === 'awaiting_input' && pending?.kind === 'workflow'}

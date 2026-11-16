@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { invalidate } from '$app/navigation';
 	import { coalesce, onJobChange } from '$lib/live.svelte';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -21,12 +22,12 @@
 <svelte:head><title>Projets · Forge</title></svelte:head>
 
 <PageHeader title="Projets" description="1 projet = 1 conteneur LXC = 1 runner GitHub self-hosted.">
-	{#snippet actions()}<Button href="/projects/new" size="sm"><Plus /> Nouveau projet</Button>{/snippet}
+	{#snippet actions()}{#if page.data.user?.canCreate}<Button href="/projects/new" size="sm"><Plus /> Nouveau projet</Button>{/if}{/snippet}
 </PageHeader>
 
 {#if data.projects.length === 0}
 	<EmptyState icon={Boxes} title="Aucun projet" description="Créez votre premier projet à partir d'un dépôt GitHub.">
-		<Button href="/projects/new" size="sm"><Plus /> Nouveau projet</Button>
+		{#if page.data.user?.canCreate}<Button href="/projects/new" size="sm"><Plus /> Nouveau projet</Button>{/if}
 	</EmptyState>
 {:else}
 	<ul class="divide-y overflow-hidden rounded-xl border bg-card">

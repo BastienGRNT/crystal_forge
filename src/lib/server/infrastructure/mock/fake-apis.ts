@@ -502,6 +502,12 @@ class FakeGithub implements GithubApi {
 			}));
 	}
 
+	/** Démo : un collaborateur voit les dépôts publics seulement. */
+	async isCollaborator(owner: string, name: string, _login: string) {
+		await delay();
+		return !repoOf(owner, name).private;
+	}
+
 	async getRepo(owner: string, name: string) {
 		await delay();
 		const r = repoOf(owner, name);

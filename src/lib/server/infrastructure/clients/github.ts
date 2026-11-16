@@ -143,6 +143,16 @@ export class GithubClient implements GithubApi {
 		}
 	}
 
+	async isCollaborator(owner: string, repo: string, login: string) {
+		try {
+			await this.#o.rest.repos.checkCollaborator({ owner, repo, username: login });
+			return true;
+		} catch (e) {
+			if ((e as { status?: number }).status === 404) return false;
+			wrap(e, `accès de ${login} à ${owner}/${repo}`);
+		}
+	}
+
 	async listDir(owner: string, repo: string, path: string, ref?: string): Promise<GhDirEntry[]> {
 		try {
 			const res = await this.#o.rest.repos.getContent({ owner, repo, path, ref });

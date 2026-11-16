@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 
 const now = sql`(unixepoch() * 1000)`;
 const timestamps = {
@@ -18,6 +18,8 @@ export const projects = sqliteTable(
 		branch: text('branch').notNull().default('main'),
 		/** production : branche main, slug du dépôt ; development : autre branche, slug « <slug>-dev », accès protégé dans NPM. */
 		environment: text('environment', { enum: ['production', 'development'] }).notNull().default('production'),
+		/** Collaborateur qui a créé le projet (compte dans ses quotas) ; null : créé par un admin. */
+		ownerId: integer('owner_id').references((): AnySQLiteColumn => users.id, { onDelete: 'set null' }),
 		workdir: text('workdir').notNull().default('.'),
 		deployMode: text('deploy_mode', { enum: ['compose', 'dockerfile'] }).notNull(),
 		composeFile: text('compose_file'),
@@ -170,6 +172,16 @@ export const users = sqliteTable(
 		passwordHash: text('password_hash').notNull(),
 		role: text('role', { enum: ['admin', 'collaborator'] }).notNull().default('collaborator'),
 		disabled: integer('disabled', { mode: 'boolean' }).notNull().default(false),
+		/** Création de projets par un collaborateur (P6) : désactivée par défaut, avec quotas. */
+		canCreateProjects: integer('can_create_projects', { mode: 'boolean' }).notNull().default(false),
+		maxProjects: integer('max_projects').notNull().default(2),
+		maxRamMb: integer('max_ram_mb').notNull().default(2048),
+		/** Zones DNS autorisées, séparées par des virgules (vide : aucune). */
+		allowedZones: text('allowed_zones').notNull().default(''),
+		/** Compte GitHub : seuls les dépôts où il est collaborateur sont proposés. */
+		githubLogin: text('github_login'),
+		/** Chaque création attend la validation d'un admin. */
+		requiresApproval: integer('requires_approval', { mode: 'boolean' }).notNull().default(true),
 		...timestamps
 	},
 	(t) => [uniqueIndex('users_username_idx').on(t.username)]

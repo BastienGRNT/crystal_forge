@@ -14,10 +14,16 @@ describe('requirementFor', () => {
 		expect(requirementFor('GET', '/settings').kind).toBe('admin');
 		expect(requirementFor('GET', '/server').kind).toBe('admin');
 		expect(requirementFor('GET', '/users').kind).toBe('admin');
-		expect(requirementFor('GET', '/projects/new').kind).toBe('admin');
-		expect(requirementFor('GET', '/api/github/repos').kind).toBe('admin');
 		expect(requirementFor('GET', '/').kind).toBe('admin');
 		expect(requirementFor('GET', '/une-page-future').kind).toBe('admin');
+	});
+
+	it('assistant de création : admin ou collaborateur autorisé (quotas vérifiés à la création)', () => {
+		expect(requirementFor('GET', '/projects/new').kind).toBe('creator');
+		expect(requirementFor('POST', '/projects/new').kind).toBe('creator');
+		expect(requirementFor('POST', '/projects/new', '?/autre').kind).toBe('admin');
+		expect(requirementFor('GET', '/api/github/repos').kind).toBe('creator');
+		expect(requirementFor('GET', '/api/github/inspect').kind).toBe('creator');
 	});
 
 	it('ouvre les listes (filtrées côté serveur) à tout connecté', () => {

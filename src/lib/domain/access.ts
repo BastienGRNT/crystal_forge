@@ -5,6 +5,9 @@
  */
 
 export type Role = 'admin' | 'collaborator';
+
+/** Confirmation d'un job réservée à l'admin : validation d'un projet demandé par un collaborateur. */
+export const ADMIN_APPROVAL_KEY = 'admin_approval';
 /** read < deploy < edit. L'admin a tout, y compris ce qui n'est accordé à personne d'autre. */
 export type AccessLevel = 'read' | 'deploy' | 'edit';
 
@@ -30,11 +33,17 @@ export function isAccessLevel(value: unknown): value is AccessLevel {
 export type Requirement =
 	| { kind: 'any' }
 	| { kind: 'admin' }
+	/** Admin, ou collaborateur autorisé à créer des projets (quotas vérifiés à la création). */
+	| { kind: 'creator' }
 	| { kind: 'project'; slug: string; level: AccessLevel }
 	| { kind: 'job'; id: number; level: AccessLevel };
 
 const ANY: Requirement = { kind: 'any' };
 const ADMIN: Requirement = { kind: 'admin' };
+const CREATOR: Requirement = { kind: 'creator' };
+
+/** Assistant de création et ses lectures (les dépôts proposés sont filtrés pour un collaborateur). */
+const CREATOR_PAGES = new Set(['/projects/new', '/api/github/repos', '/api/github/inspect', '/api/wizard/preview', '/api/wizard/domain']);
 
 /** Pages accessibles à tout utilisateur connecté (les listes sont filtrées côté serveur). */
 const OPEN_PAGES = new Set(['/projects', '/jobs', '/logout', '/account', '/api/events']);
@@ -84,6 +93,7 @@ export function requirementFor(method: string, pathname: string, search = ''): R
 	const action = formActionName(search);
 
 	if (OPEN_PAGES.has(path)) return ANY;
+	if (CREATOR_PAGES.has(path)) return path === '/projects/new' && !isRead && action !== '' ? ADMIN : CREATOR;
 
 	const project = /^\/projects\/([^/]+)(?:\/([^/]+))?$/.exec(path);
 	if (project && project[1] !== 'new') {

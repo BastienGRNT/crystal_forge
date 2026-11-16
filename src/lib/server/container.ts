@@ -336,6 +336,7 @@ function build(): Forge {
 		}
 	});
 
+	const wizard = new WizardService(services, auth);
 	const forge: Forge = {
 		...services,
 		engine,
@@ -343,8 +344,8 @@ function build(): Forge {
 		audit: new AuditRepo(db),
 		accounts,
 		dashboard: new DashboardService(services),
-		wizard: new WizardService(services),
-		projects: new ProjectService(services, engine),
+		wizard,
+		projects: new ProjectService(services, engine, auth, wizard),
 		connections: new ConnectionTester(services),
 		jobs: new JobQueries(services),
 		database: new DatabaseService(services, engine),

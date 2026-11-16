@@ -61,6 +61,21 @@
 				{/if}
 			{/snippet}
 			{#if u.role === 'collaborator'}
+				<form method="POST" action="?/creator" use:enhance class="mb-4 space-y-3 rounded-lg border p-3">
+					<input type="hidden" name="userId" value={u.id} />
+					<label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" name="canCreate" checked={u.creator.canCreate} /> Peut créer ses propres projets</label>
+					<div class="grid gap-3 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+						<label class="space-y-1">Projets max<Input name="maxProjects" type="number" min="0" max="50" value={u.creator.maxProjects} /></label>
+						<label class="space-y-1">RAM totale max (Mo)<Input name="maxRamMb" type="number" min="0" step="128" value={u.creator.maxRamMb} /></label>
+						<label class="space-y-1">Zones DNS autorisées<Input name="allowedZones" placeholder="exemple.fr, autre.fr" value={u.creator.allowedZones.join(', ')} /></label>
+						<label class="space-y-1">Compte GitHub<Input name="githubLogin" placeholder="login GitHub" value={u.creator.githubLogin ?? ''} autocomplete="off" /></label>
+					</div>
+					<div class="flex flex-wrap items-center justify-between gap-2">
+						<label class="flex items-center gap-2 text-sm"><input type="checkbox" name="requiresApproval" checked={u.creator.requiresApproval} /> Chaque création attend ma validation</label>
+						<Button type="submit" size="sm" variant="outline">Enregistrer</Button>
+					</div>
+					<p class="text-xs text-muted-foreground">Il ne voit que les dépôts GitHub où son compte est collaborateur. Il devient « Édition » sur les projets qu'il crée.</p>
+				</form>
 				<div class="grid gap-2 md:grid-cols-2">
 					{#each data.projects as p (p.id)}
 						<form method="POST" action="?/member" use:enhance class="flex items-center gap-2">
