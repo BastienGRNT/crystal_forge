@@ -17,6 +17,18 @@ import type { ForgeServices } from '../services';
 import { firewallPlan } from '../jobs/steps/firewall';
 import { poolAuditFix } from './connections';
 
+/** Plafond des journaux systemd d'un CT de projet (idempotent : ne redémarre journald que si besoin). */
+export interface GuestMemory {
+	vmid: number;
+	name: string;
+	slug: string | null;
+	used: number;
+	max: number;
+}
+
+const JOURNALD_CAP_COMMAND =
+	"f=/etc/systemd/journald.conf.d/forge.conf; c='[Journal]\\nSystemMaxUse=50M\\n'; [ \"$(cat $f 2>/dev/null)\" = \"$(printf \"$c\")\" ] || { mkdir -p /etc/systemd/journald.conf.d && printf \"$c\" > $f && systemctl restart systemd-journald; }";
+
 export type HealthStatus = 'ok' | 'warn' | 'error' | 'info';
 
 export interface HealthCheck {
@@ -81,7 +93,7 @@ export class ServerHealthService {
 		return out;
 	}
 
-	async run(clientIp: string | null): Promise<{ checks: HealthCheck[]; checkedAt: number }> {
+	async run(clientIp: string | null): Promise<{ checks: HealthCheck[]; checkedAt: number; memory: GuestMemory[] }> {
 		const { proxmox, settings, repos } = this.s;
 		const templateId = settings.int('proxmox.templateId');
 		const pool = settings.get('proxmox.pool');
@@ -493,7 +505,13 @@ export class ServerHealthService {
 				{ id: 'ssh', group: 'Accès', label: 'Accès' }
 			)
 		]);
-		return { checks: groups.flat(), checkedAt: Date.now() };
+		// RAM réellement utilisée par chaque CT allumé, du plus gourmand au moins gourmand.
+		const slugs = new Map(repos.projects.list().filter((p) => p.ctid).map((p) => [p.ctid as number, p.slug]));
+		const memory: GuestMemory[] = (await guestsP.catch(() => []))
+			.filter((g) => g.status === 'running' && !g.template)
+			.map((g) => ({ vmid: g.vmid, name: g.name, slug: slugs.get(g.vmid) ?? null, used: g.mem, max: g.maxmem }))
+			.sort((a, b) => b.used - a.used);
+		return { checks: groups.flat(), checkedAt: Date.now(), memory };
 	}
 
 	/** Projets dont le CT tourne et répond en SSH. */
@@ -586,8 +604,20 @@ export class ServerHealthService {
 			if (!cfg || Number(cfg.cpuunits ?? 100) === want) continue;
 			await attempt(`priorité CPU de ${p.slug} = ${want}`, () => proxmox.configure(p.ctid as number, { cpuunits: want }));
 		}
+
+		// 4. Journaux système des projets plafonnés à 50 Mo (une fois par CT et par démarrage de Forge).
+		const running = new Set(guests.filter((g) => g.status === 'running').map((g) => g.vmid));
+		for (const p of repos.projects.list().filter((x) => x.status === 'active' && x.ctid && x.ip && running.has(x.ctid) && !this.#journaldDone.has(x.id))) {
+			if (repos.jobs.activeForProject(p.id)) continue;
+			await attempt(`journaux de ${p.slug} plafonnés à 50 Mo`, async () => {
+				await this.s.shell.run({ ip: p.ip!, sshHostKey: p.sshHostKey }, 'root', JOURNALD_CAP_COMMAND, { summary: 'Journaux système plafonnés à 50 Mo' });
+				this.#journaldDone.add(p.id);
+			});
+		}
 		return { done, failed };
 	}
+
+	readonly #journaldDone = new Set<number>();
 
 	/** (Ré)applique le pare-feu des projets qui ne sont pas à jour (un job par projet). */
 	async applyFirewalls(enqueue: (projectId: number) => number): Promise<number[]> {

@@ -21,8 +21,13 @@
 #      sparse) sur le pool ZFS qui porte /var/lib/vz. Les nouveaux CT y sont créés
 #      par Forge ; les anciens y passent depuis Forge (onglet Conteneur). Ignoré si
 #      /var/lib/vz n'est pas sur ZFS.
+#   7. zram (paquet zram-tools, zstd, 25 % de la RAM, priorité 100) : un swap
+#      compressé en RAM qui amortit les pointes au lieu de remplir le swap disque.
+#   8. Protection mémoire de NPM (CT 100, 256 Mo) et de Forge (CT 150, 512 Mo) :
+#      clé lxc.cgroup2.memory.low (réservée à root) + valeur posée à chaud. Sous
+#      pression, le noyau reprend d'abord la mémoire des autres CT.
 #
-# Ne touche à AUCUN CT. Idempotent : ne fait que ce qui manque.
+# Ne redémarre AUCUN CT. Idempotent : ne fait que ce qui manque.
 # Usage : bash infra/09-host-setup.sh   (ou bash infra/bootstrap.sh)
 # =============================================================================
 source "$(dirname "$0")/lib.sh"
@@ -45,7 +50,16 @@ total_bytes=$(awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo)
 arc_target=$(( total_bytes / 10 ))
 (( arc_target < 1073741824 )) && arc_target=1073741824
 
-todo_arc=0 todo_swap=0 todo_storage=0 todo_tmpdir=0 todo_zfs=0
+todo_arc=0 todo_swap=0 todo_storage=0 todo_tmpdir=0 todo_zfs=0 todo_zram=0
+# CT critiques protégés : « vmid:octets ».
+MEM_LOW=("100:268435456" "150:536870912")
+swapon --show=NAME --noheadings 2>/dev/null | grep -q zram || todo_zram=1
+mem_low_todo=()
+for e in "${MEM_LOW[@]}"; do
+	id="${e%%:*}"
+	[[ -f "/etc/pve/lxc/$id.conf" ]] || continue
+	grep -qx "lxc.cgroup2.memory.low: ${e##*:}" "/etc/pve/lxc/$id.conf" || mem_low_todo+=("$e")
+done
 if [[ -r /sys/module/zfs/parameters/zfs_arc_max ]] && ! grep -qs "zfs_arc_max=$arc_target\b" /etc/modprobe.d/zfs.conf; then todo_arc=1; fi
 grep -qs "^vm.swappiness = $SWAPPINESS$" /etc/sysctl.d/90-forge.conf || todo_swap=1
 pvesm status --storage "$BK_STORAGE" >/dev/null 2>&1 || todo_storage=1
@@ -59,7 +73,7 @@ mapfile -t jobs_to_migrate < <(pvesh get /cluster/backup --output-format json | 
 	}' "$BK_STORAGE")
 
 title "Réglages de l'hôte"
-if (( todo_arc + todo_swap + todo_storage + todo_tmpdir + todo_zfs + ${#jobs_to_migrate[@]} == 0 )); then
+if (( todo_arc + todo_swap + todo_storage + todo_tmpdir + todo_zfs + todo_zram + ${#mem_low_todo[@]} + ${#jobs_to_migrate[@]} == 0 )); then
 	ok "Tout est déjà en place : rien à faire."
 	exit 0
 fi
@@ -67,6 +81,8 @@ fi
 (( todo_swap )) && plan "vm.swappiness = $SWAPPINESS (à chaud + /etc/sysctl.d/90-forge.conf)"
 (( todo_storage )) && plan "Créer le stockage « $BK_STORAGE » ($BK_PATH, contenu : sauvegardes)"
 (( todo_zfs )) && plan "Créer le stockage ZFS « $ZFS_STORAGE » (dataset $ZFS_DATASET, disques des CT)"
+(( todo_zram )) && plan "zram : swap compressé en RAM (zram-tools, zstd, 25 % de la RAM, prioritaire sur le swap disque)"
+for e in "${mem_low_todo[@]}"; do plan "CT ${e%%:*} : mémoire protégée $(( ${e##*:} / 1048576 )) Mo (lxc.cgroup2.memory.low, à chaud, sans redémarrage)"; done
 (( todo_tmpdir )) && plan "/etc/vzdump.conf : tmpdir: $BK_TMP"
 for j in "${jobs_to_migrate[@]}"; do plan "Job « ${j%%$'\t'*} » → stockage $BK_STORAGE$([[ ${j##*$'\t'} == 1 ]] && echo ', sans tmpdir')"; done
 confirm "Appliquer ?"
@@ -116,6 +132,25 @@ if (( todo_zfs )); then
 	run pvesm add zfspool "$ZFS_STORAGE" --pool "$ZFS_DATASET" --content rootdir --sparse 1
 	ok "Stockage ZFS « $ZFS_STORAGE » créé : Forge y mettra les nouveaux CT."
 fi
+
+if (( todo_zram )); then
+	run apt-get install -y zram-tools
+	run sh -c "printf 'ALGO=zstd\nPERCENT=25\nPRIORITY=100\n' > /etc/default/zramswap"
+	run systemctl enable zramswap.service
+	run systemctl restart zramswap.service
+	ok "zram actif : $(swapon --show=NAME,SIZE --noheadings | grep zram | tr -s ' ')"
+fi
+
+for e in "${mem_low_todo[@]}"; do
+	id="${e%%:*}" val="${e##*:}" conf="/etc/pve/lxc/${e%%:*}.conf"
+	# La clé doit être dans la section principale, avant les instantanés « [nom] ».
+	run perl -0pi -e "s/^lxc\.cgroup2\.memory\.low:.*\n//mg; s/^(?=\[)|\z/lxc.cgroup2.memory.low: $val\n/m" "$conf"
+	if [[ -w "/sys/fs/cgroup/lxc/$id/memory.low" ]]; then
+		echo "$val" > "/sys/fs/cgroup/lxc/$id/memory.low" && ok "CT $id : $(( val / 1048576 )) Mo protégés (à chaud et au prochain démarrage)."
+	else
+		ok "CT $id : $(( val / 1048576 )) Mo protégés au prochain démarrage du CT."
+	fi
+done
 
 for j in "${jobs_to_migrate[@]}"; do
 	id="${j%%$'\t'*}"

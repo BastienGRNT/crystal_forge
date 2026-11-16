@@ -86,6 +86,21 @@
 		<span class="text-xs text-muted-foreground">Vérifié <RelativeTime value={report.checkedAt} /></span>
 	</div>
 
+	{#if report.memory.length}
+		<SectionCard title="RAM réelle par conteneur" icon={HeartPulse} class="mb-6">
+			<ul class="space-y-2">
+				{#each report.memory as g (g.vmid)}
+					{@const pct = g.max ? Math.min(100, Math.round((g.used / g.max) * 100)) : 0}
+					<li class="grid grid-cols-[minmax(0,12rem)_1fr_auto] items-center gap-3 text-sm">
+						{#if g.slug}<a href="/projects/{g.slug}/container" class="truncate font-mono text-xs hover:underline">{g.slug} · CT {g.vmid}</a>{:else}<span class="truncate font-mono text-xs">{g.name} · CT {g.vmid}</span>{/if}
+						<div class="h-2 overflow-hidden rounded-full bg-muted"><div class={cn('h-full rounded-full', pct >= 90 ? 'bg-danger' : pct >= 75 ? 'bg-warning' : 'bg-success')} style="width: {pct}%"></div></div>
+						<span class="text-xs whitespace-nowrap text-muted-foreground tabular-nums">{formatBytes(g.used)} / {formatBytes(g.max)}</span>
+					</li>
+				{/each}
+			</ul>
+		</SectionCard>
+	{/if}
+
 	<div class="grid items-start gap-6 lg:grid-cols-2">
 		{#each grouped(report.checks) as [group, checks] (group)}
 			<SectionCard title={group} icon={HeartPulse} bodyClass="p-0">

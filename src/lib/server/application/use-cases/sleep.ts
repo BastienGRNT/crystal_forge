@@ -11,11 +11,14 @@
 import { connect } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { errorMessage } from '$lib/domain/errors';
+import { hostMemoryInUse } from '$lib/domain/sizes';
 import { idleRuleCommand, isIdle, nextActivity, parseIdleCounter, WAKE_PORT } from '$lib/domain/sleep';
 import type { ProjectRow } from '$server/infrastructure/db/schema';
 import type { ForgeServices } from '../services';
 
 const CHECK_EVERY_MS = 2 * 60_000;
+/** RAM que l'hôte doit garder libre après un réveil (sinon on refuse, plutôt que de faire swapper tout le monde). */
+const WAKE_RAM_MARGIN = 2 * 1024 ** 3;
 
 const tcpOpen = (host: string, port: number) =>
 	new Promise<boolean>((resolve) => {
@@ -162,6 +165,14 @@ export class SleepService {
 		if (!p?.sleepingSince || !p.ctid || !p.ip) return;
 		try {
 			const g = (await this.s.proxmox.guests()).find((x) => x.vmid === p.ctid);
+			if (g?.status !== 'running') {
+				// Contrôle d'admission : on ne rallume pas un CT si l'hôte n'a plus la place.
+				const n = await this.s.proxmox.nodeStatus();
+				const need = g?.maxmem ?? 0;
+				if (hostMemoryInUse(n.memory) + need > n.memory.total - WAKE_RAM_MARGIN) {
+					throw new Error(`RAM du serveur insuffisante pour le réveiller (${Math.round(need / 1024 ** 2)} Mo demandés) — réessayez plus tard ou endormez un autre serveur`);
+				}
+			}
 			if (g?.status !== 'running') await this.s.proxmox.waitTask(await this.s.proxmox.power(p.ctid, 'start'), { timeoutMs: 3 * 60_000 });
 			const deadline = Date.now() + 4 * 60_000;
 			while (!(await tcpOpen(p.ip, p.appPort))) {
