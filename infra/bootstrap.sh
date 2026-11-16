@@ -17,6 +17,7 @@
 #   03   template 900 Docker + runner      (si CT 900 absent) — clé SSH lue dans Forge
 #   05   pare-feu datacenter               (si désactivé)
 #   07   zone conntrack fwbr+              (seulement ce qui manque)
+#   10   port 3001 de Forge (page de réveil) filtré : NPM seulement
 #
 # Ensuite, Forge entretient seul le serveur (toutes les 6 h) : jobs de sauvegarde,
 # RAM de NPM, priorités CPU, caches de build. Relancer ce script après une mise à
@@ -109,6 +110,10 @@ fi
 
 title "07 · Zone conntrack des ponts fwbr (NAT des CT avec pare-feu)"
 bash "$INFRA_DIR/07-conntrack-zone.sh"
+
+if step 10 "Port de réveil des serveurs de dev (3001, NPM seulement)" 'pct exec 150 -- grep -q FORGE-WAKE /usr/local/sbin/forge-firewall 2>/dev/null'; then
+	bash "$INFRA_DIR/10-wake-port.sh"
+fi
 
 title "Terminé — infrastructure prête"
 setup_line="$(pct exec 150 -- docker logs forge 2>&1 | grep -o "Jeton d'installation : .*" | tail -n1 || true)"

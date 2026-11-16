@@ -100,6 +100,12 @@ iptables -A FORGE-IN -s 100.64.0.0/10 -j ACCEPT
 iptables -A FORGE-IN -s 127.0.0.0/8 -j ACCEPT
 iptables -A FORGE-IN -j DROP
 iptables -C INPUT -p tcp --dport $FORGE_PORT -j FORGE-IN 2>/dev/null || iptables -I INPUT -p tcp --dport $FORGE_PORT -j FORGE-IN
+# Page de réveil des serveurs de dev endormis : NPM seulement.
+iptables -N FORGE-WAKE 2>/dev/null || iptables -F FORGE-WAKE
+iptables -A FORGE-WAKE -s 10.10.10.2/32 -j ACCEPT
+iptables -A FORGE-WAKE -s 127.0.0.0/8 -j ACCEPT
+iptables -A FORGE-WAKE -j DROP
+iptables -C INPUT -p tcp --dport 3001 -j FORGE-WAKE 2>/dev/null || iptables -I INPUT -p tcp --dport 3001 -j FORGE-WAKE
 SCRIPT
 chmod 755 /usr/local/sbin/forge-firewall
 cat >/etc/systemd/system/forge-firewall.service <<'UNIT'

@@ -31,6 +31,7 @@ import {
 import { assertSafeBackupJob, assertSafeCriticalCtTune, type DesiredBackupJob } from '$lib/domain/host-maintenance';
 import { OFFSITE_RETENTION, assertOffsitePath, assertSnapshotId, parseSnapshots, resticRepository, retentionArgs, type OffsiteSnapshot } from '$lib/domain/offsite';
 import { FORGE_ZFS_STORAGE, assertSafeVolumeMove } from '$lib/domain/storage';
+import { IDLE_READ_COMMAND, WAKE_PORT, assertCanToggleSleep } from '$lib/domain/sleep';
 import { TtlCache } from './cache';
 import { DRY_PREFIX, isSimulated, type WriteGuard, type WriteOp } from './guard';
 import type {
@@ -766,6 +767,23 @@ export class ProxyGateway {
 		});
 	}
 
+	/** Mise en veille / réveil : bascule entre le CT du projet et la page de réveil de Forge, rien d'autre. */
+	toggleSleepTarget(id: number, to: { forwardHost: string; forwardPort: number }, t: { projectIp: string; appPort: number; wakeHost: string }): Promise<unknown> {
+		return this.#run({
+			system: 'npm',
+			action: 'proxy-host.sleep',
+			summary: `Proxy host #${id} → http://${to.forwardHost}:${to.forwardPort} (${to.forwardPort === WAKE_PORT ? 'mise en veille' : 'réveil'})`,
+			check: async () => {
+				const host = (await this.api.listProxyHosts()).find((h) => h.id === id);
+				if (!host) throw new SafetyViolation('npm.missing', `Le proxy host #${id} n'existe plus dans NPM.`);
+				assertOwned('npm_proxy_host', host.id, this.d.ownership.owned('npm_proxy_host'), 'Le proxy host');
+				assertCanToggleSleep(host, to, t);
+			},
+			execute: () => this.api.updateProxyHost(id, { forward_host: to.forwardHost, forward_port: to.forwardPort }),
+			simulate: () => null
+		});
+	}
+
 	/** Nouveau port de l'app : le proxy host (créé par Forge) garde son domaine, son certificat et sa cible. */
 	repointProxyHost(id: number, forwardHost: string, forwardPort: number): Promise<NpmProxyHost> {
 		return this.#run({
@@ -974,6 +992,12 @@ export class ShellGateway {
 			execute: () => this.#exec(t, 'github', cmd, undefined, timeoutMs, stdin),
 			simulate: () => ({ code: 0, stdout: '', stderr: '', hostKey: t.sshHostKey ?? '' })
 		});
+	}
+
+	/** Compteur de connexions vers l'app (mise en veille) : lecture seule, en root car iptables l'exige. */
+	async idleCounter(t: ShellTarget): Promise<SshResult> {
+		this.#checks(t, IDLE_READ_COMMAND);
+		return this.#exec(t, 'root', IDLE_READ_COMMAND, undefined, 20_000);
 	}
 
 	/** Test de connexion (commande `true`) : lecture, autorisée en DRY_RUN. */

@@ -3,6 +3,7 @@ import { forge } from '$server/container';
 import { errorMessage } from '$lib/domain/errors';
 import type { PowerAction } from '$server/application/ports';
 import { FORGE_ZFS_STORAGE, rootfsStorage } from '$lib/domain/storage';
+import { SLEEP_MINUTES_CHOICES } from '$lib/domain/sleep';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, depends }) => {
@@ -22,6 +23,7 @@ export const load: PageServerLoad = async ({ params, depends }) => {
 		},
 		services: f.projects.containerServices(p, view.guest?.status === 'running'),
 		composePath: f.projects.composePath(p),
+		sleep: p.environment === 'development' ? { ...f.sleep.status(p), minutes: p.sleepAfterMin ?? 0, choices: [...SLEEP_MINUTES_CHOICES] } : null,
 		firewall
 	};
 };
@@ -52,6 +54,24 @@ export const actions: Actions = {
 			return fail(400, { error: errorMessage(err) });
 		}
 		redirect(303, `/jobs/${id}`);
+	},
+	sleep: async ({ params, request }) => {
+		const f = forge();
+		const p = f.projects.get(params.slug);
+		const minutes = Number((await request.formData()).get('minutes'));
+		if (!(SLEEP_MINUTES_CHOICES as readonly number[]).includes(minutes)) return fail(400, { error: 'Délai invalide.' });
+		f.sleep.setDelay(p, minutes);
+		if (minutes === 0 && p.sleepingSince) f.sleep.wakeFromVisit(p.id);
+		return { saved: true };
+	},
+	wake: async ({ params }) => {
+		const f = forge();
+		try {
+			await f.sleep.wake(f.projects.get(params.slug).id);
+		} catch (err) {
+			return fail(400, { error: `Réveil impossible : ${errorMessage(err)}` });
+		}
+		return { saved: true };
 	},
 	moveToZfs: async ({ params }) => {
 		const f = forge();

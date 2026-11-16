@@ -51,6 +51,7 @@
 	let confirmOpen = $state(false);
 	let powerForm: HTMLFormElement | undefined = $state();
 	let moving = $state(false);
+	let waking = $state(false);
 	let powerAction = $state('');
 
 	let tail = $state('200');
@@ -154,6 +155,29 @@
 				<KeyValue label="Clé d'hôte SSH" mono>{data.project.sshHostKey ?? 'pas encore vue'}</KeyValue>
 			</dl>
 		</SectionCard>
+
+		{#if data.sleep}
+			{@const z = data.sleep}
+			<SectionCard title="Mise en veille" description="Serveur de dev : éteint après un moment sans visiteur, rallumé tout seul au premier visiteur (page « réveil en cours », moins d'une minute). Économise la RAM du serveur." icon={Power}>
+				{#if z.sleeping}
+					<p class="mb-3 text-sm">💤 Endormi depuis {new Date(z.since ?? 0).toLocaleString('fr-FR')}.{#if z.wakeError} <span class="text-danger">Dernier réveil en échec : {z.wakeError}</span>{/if}</p>
+				{:else if z.lastActivity}
+					<p class="mb-3 text-sm text-muted-foreground">Dernière visite vue : {new Date(z.lastActivity).toLocaleString('fr-FR')}.</p>
+				{/if}
+				<div class="flex flex-wrap items-center gap-2">
+					<form method="POST" action="?/sleep" use:enhance class="flex items-center gap-2">
+						<select name="minutes" class="h-8 rounded-md border bg-background px-2 text-sm" value={z.minutes} onchange={(e) => e.currentTarget.form?.requestSubmit()}>
+							{#each z.choices as m (m)}<option value={m}>{m === 0 ? 'Jamais' : m < 60 ? `Après ${m} min sans visite` : `Après ${m / 60} h sans visite`}</option>{/each}
+						</select>
+					</form>
+					{#if z.sleeping}
+						<form method="POST" action="?/wake" use:enhance={() => { waking = true; return async ({ update }) => { await update(); waking = false; }; }}>
+							<Button type="submit" size="sm" disabled={waking}>{#if waking}<Spinner />{:else}<Play />{/if} Réveiller maintenant</Button>
+						</form>
+					{/if}
+				</div>
+			</SectionCard>
+		{/if}
 
 		{#if data.storage.canMove}
 			<Alert.Root>

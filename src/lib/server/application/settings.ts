@@ -61,6 +61,8 @@ export const SETTING_DEFS = {
 	'ovh.appSecret': { default: '', secret: true },
 	'ovh.consumerKey': { default: '', secret: true },
 	'npm.url': { default: 'http://10.10.10.2:81' },
+	/** IP de Forge vue par NPM, pour la page de réveil des serveurs endormis (vide = détectée). */
+	'sleep.wakeHost': { default: '' },
 	'npm.identity': { default: '' },
 	'npm.secret': { default: '', secret: true },
 	'letsencrypt.email': { default: '' },

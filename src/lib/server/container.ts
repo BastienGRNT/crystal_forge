@@ -38,6 +38,8 @@ import { seedMockDatabase } from './infrastructure/mock/seed';
 import { resetWorld } from './infrastructure/mock/world';
 import { exportPublicKey, importProvisioning } from './application/provisioning';
 import { OffsiteBackupService } from './application/use-cases/offsite';
+import { SleepService } from './application/use-cases/sleep';
+import { startWakeServer } from './infrastructure/wake/server';
 import { ResticClient } from './infrastructure/clients/restic';
 import { createHmac } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
@@ -53,6 +55,7 @@ export function offsitePassword(masterKey: Buffer): string {
 
 export interface Forge extends ForgeServices {
 	offsite: OffsiteBackupService;
+	sleep: SleepService;
 	engine: JobEngine;
 	auth: AuthService;
 	audit: AuditRepo;
@@ -336,6 +339,8 @@ function build(): Forge {
 		}
 	});
 
+	const sleep = new SleepService(services);
+	engine.setBeforeJob((projectId) => sleep.beforeJob(projectId));
 	const wizard = new WizardService(services, auth);
 	const forge: Forge = {
 		...services,
@@ -350,6 +355,7 @@ function build(): Forge {
 		jobs: new JobQueries(services),
 		database: new DatabaseService(services, engine),
 		offsite,
+		sleep,
 		health: new ServerHealthService(services, offsite),
 		upgrade: new UpgradeService(services, engine),
 		selfUpdate: new SelfUpdateService(services, engine),
@@ -393,12 +399,35 @@ function build(): Forge {
 			.catch((err) => console.warn(`[forge] Sauvegarde hors serveur : ${err instanceof Error ? err.message : err}`));
 	setTimeout(offsiteTick, 3 * 60_000).unref();
 	setInterval(offsiteTick, 3600_000).unref();
+	// Serveurs de dev : mise en veille après inactivité, réveil par la page d'attente (port à part).
+	setInterval(() => void sleep.tick().catch((err) => console.warn(`[veille] ${err instanceof Error ? err.message : err}`)), SleepService.CHECK_EVERY_MS).unref();
+	if (config.mode === 'live') {
+		const g = globalThis as unknown as Record<symbol, { close(): void } | undefined>;
+		g[WAKE_KEY]?.close();
+		g[WAKE_KEY] = startWakeServer({
+			npmIp: () => {
+				try {
+					return new URL(settings.get('npm.url')).hostname;
+				} catch {
+					return '';
+				}
+			},
+			projectForHost: (host) => {
+				const d = domains.byFqdn(host);
+				const p = d ? projects.get(d.projectId) : undefined;
+				return p ? { id: p.id, name: p.name, sleeping: !!p.sleepingSince } : null;
+			},
+			wake: (id) => sleep.wakeFromVisit(id),
+			wakeError: (id) => sleep.wakeErrorFor(id)
+		});
+	}
 	console.log(`[forge] Démarré en mode ${config.mode.toUpperCase()} — DRY_RUN ${isDryRun() ? 'ACTIVÉ' : 'désactivé'} — base ${config.databasePath}`);
 	if (config.masterKeyIsDevFallback) console.warn('[forge] ⚠ FORGE_MASTER_KEY absente : clé de démonstration utilisée (mode mock uniquement).');
 	return forge;
 }
 
 const KEY = Symbol.for('forge.container');
+const WAKE_KEY = Symbol.for('forge.wake-server');
 
 export function forge(): Forge {
 	const g = globalThis as unknown as Record<symbol, Forge | undefined>;

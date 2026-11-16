@@ -54,6 +54,7 @@
 	<div class="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 text-sm text-muted-foreground">
 		<StatusBadge status={p.status} />
 		<Badge variant={p.environment === 'development' ? 'outline' : 'secondary'}>{p.environment === 'development' ? 'DEV' : 'PROD'}</Badge>
+		{#if p.sleepingSince}<Badge variant="outline">En veille</Badge>{/if}
 		<a href="https://github.com/{p.repoOwner}/{p.repoName}" target="_blank" rel="noreferrer" class="inline-flex items-center gap-1.5 font-mono text-xs hover:text-foreground">
 			<GithubIcon class="size-3.5" />
 			{p.repoOwner}/{p.repoName}@{p.branch}

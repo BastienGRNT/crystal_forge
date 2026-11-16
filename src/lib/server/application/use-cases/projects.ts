@@ -1,4 +1,5 @@
 /** Cas d'usage sur les projets : création + déploiement, .env, domaines, conteneur, suppression. */
+import { DEFAULT_SLEEP_MINUTES } from '$lib/domain/sleep';
 import { detectDeployMode, isValidServiceName, normalizeWorkdir, repoPath } from '$lib/domain/compose-detect';
 import { buildFqdn, isValidSubdomain, isValidZone, normalizeSubdomain, servesDomain } from '$lib/domain/domain-name';
 import { errorMessage, RamTightError, SafetyViolation, UserFacingError } from '$lib/domain/errors';
@@ -197,6 +198,7 @@ export class ProjectService {
 			...(db ?? {}),
 			size,
 			status: 'draft',
+			sleepAfterMin: environment === 'development' ? DEFAULT_SLEEP_MINUTES : null,
 			ownerId: limits && creator ? creator.id : null
 		});
 		// Le créateur gère son projet (niveau « édition ») ; les réglages sensibles restent à l'admin.

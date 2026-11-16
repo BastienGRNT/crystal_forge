@@ -35,6 +35,10 @@ export const projects = sqliteTable(
 		/** Taille personnalisée (null = valeur du préréglage). */
 		cores: integer('cores'),
 		memoryMb: integer('memory_mb'),
+		/** Serveur de dev : minutes sans visiteur avant mise en veille (null/0 = jamais). */
+		sleepAfterMin: integer('sleep_after_min'),
+		/** Endormi depuis (ms) : NPM envoie les visiteurs vers la page de réveil de Forge. */
+		sleepingSince: integer('sleeping_since'),
 		diskGb: integer('disk_gb'),
 		ctid: integer('ctid'),
 		ip: text('ip'),

@@ -50,6 +50,13 @@ export class JobEngine {
 		this.#kick();
 	}
 
+	#beforeJob: (projectId: number | null) => Promise<void> = async () => {};
+
+	/** Appelé avant chaque job (réveil d'un serveur de dev endormi). */
+	setBeforeJob(fn: (projectId: number | null) => Promise<void>): void {
+		this.#beforeJob = fn;
+	}
+
 	/** Bloque les nouveaux jobs tant que `reason()` renvoie un message (ex. reconstruction de Forge). */
 	setBlocker(reason: () => string | null): void {
 		this.#blocker = reason;
@@ -232,6 +239,16 @@ export class JobEngine {
 		};
 
 		def.onStart?.(base);
+
+		try {
+			await this.#beforeJob(projectId);
+		} catch (err) {
+			this.#log(row.id, null, 'error', `Réveil du serveur impossible : ${errorMessage(err)}`);
+			this.s.repos.jobs.setStatus(row.id, 'failed', { error: `Le serveur dormait et n'a pas pu être réveillé : ${errorMessage(err)}` });
+			this.#emitStatus(row.id);
+			this.#current = null;
+			return;
+		}
 
 		const steps = this.s.repos.jobs.steps(row.id);
 		for (const step of steps) {
