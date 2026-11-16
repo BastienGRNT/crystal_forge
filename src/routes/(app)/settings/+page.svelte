@@ -380,7 +380,7 @@
 			<input type="hidden" name="_section" value="offsite" />
 			<SectionCard
 				title="Sauvegardes hors serveur (Cloudflare R2)"
-				description="Forge envoie seul, chiffré : sa propre base toutes les heures, les bases des projets chaque nuit. Rétention 7 jours / 4 semaines / 6 mois, test de restauration chaque mois."
+				description="Forge envoie seul, chiffré : sa propre base toutes les heures, les bases des projets chaque nuit. Rétention 7 jours / 4 semaines / 5 mois (16 copies max), test de restauration chaque mois."
 				icon={CloudUpload}
 			>
 				<ol class="mb-5 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
@@ -424,6 +424,26 @@
 				{#if form?.section === 'offsite' && form?.error}<p class="text-sm text-destructive">{form.error}</p>{/if}
 			{/snippet}
 		</SectionCard>
+		{#if data.offsiteConfigured}
+			<SectionCard title="Copies sur R2" description="Téléchargement déchiffré par Forge : le fichier arrive en clair (base de Forge en .db, bases des projets en .sql.gz). Rien n'est modifié sur R2." icon={Download} bodyClass="p-0">
+				{#await data.offsiteSnapshots}
+					<p class="p-4 text-sm text-muted-foreground">Lecture des copies…</p>
+				{:then snaps}
+					<ul class="scrollbar-thin max-h-96 divide-y overflow-y-auto text-sm">
+						{#each snaps as s (s.id)}
+							<li class="flex items-center gap-3 px-4 py-2">
+								<span class="min-w-0 flex-1 truncate font-mono text-[12.5px]">{s.path.replace(/^\//, '')}</span>
+								<span class="hidden font-mono text-[11px] text-muted-foreground sm:inline">{s.id.slice(0, 8)}</span>
+								<span class="w-36 text-right text-xs text-muted-foreground">{new Date(s.time).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}</span>
+								<Button href="/api/offsite/download?snapshot={s.id}" download size="sm" variant="ghost" class="h-7 text-xs"><Download /> Télécharger</Button>
+							</li>
+						{:else}
+							<li class="px-4 py-6 text-center text-sm text-muted-foreground">Aucune copie pour l'instant.</li>
+						{/each}
+					</ul>
+				{/await}
+			</SectionCard>
+		{/if}
 	</Tabs.Content>
 
 	<!-- SSH -->

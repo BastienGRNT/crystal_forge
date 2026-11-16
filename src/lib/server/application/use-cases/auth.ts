@@ -29,6 +29,7 @@ export interface UserView extends SessionUser {
 	creator: CreatorLimits & { requiresApproval: boolean };
 	createdAt: number;
 	projects: { projectId: number; level: AccessLevel }[];
+	spaces: { spaceId: number; level: AccessLevel }[];
 }
 
 export class AuthService {
@@ -198,6 +199,7 @@ export class AuthService {
 
 	listUsers(): UserView[] {
 		const members = this.repo.allMemberships();
+		const spaceMembers = this.repo.allSpaceMemberships();
 		return this.repo.listUsers().map((u) => ({
 			id: u.id,
 			username: u.username,
@@ -205,7 +207,8 @@ export class AuthService {
 			disabled: u.disabled,
 			creator: { ...this.#limits(u), requiresApproval: u.requiresApproval },
 			createdAt: u.createdAt,
-			projects: members.filter((m) => m.userId === u.id).map((m) => ({ projectId: m.projectId, level: m.level }))
+			projects: members.filter((m) => m.userId === u.id).map((m) => ({ projectId: m.projectId, level: m.level })),
+			spaces: spaceMembers.filter((m) => m.userId === u.id).map((m) => ({ spaceId: m.spaceId, level: m.level }))
 		}));
 	}
 
@@ -279,5 +282,20 @@ export class AuthService {
 		if (user.role === 'admin') throw new UserFacingError("L'admin a déjà accès à tout.");
 		if (level === null) this.repo.removeMember(userId, projectId);
 		else this.repo.setMember(userId, projectId, level);
+	}
+
+	/** Donne (ou retire) à un collaborateur l'accès à tout un espace, projets futurs compris. */
+	setSpaceMember(userId: number, spaceId: number, level: AccessLevel | null): void {
+		const user = this.#target(userId);
+		if (user.role === 'admin') throw new UserFacingError("L'admin a déjà accès à tout.");
+		if (level === null) this.repo.removeSpaceMember(userId, spaceId);
+		else this.repo.setSpaceMember(userId, spaceId, level);
+	}
+
+	notificationsSeenAt(userId: number): number {
+		return this.repo.userById(userId)?.notificationsSeenAt ?? 0;
+	}
+	markNotificationsSeen(userId: number): void {
+		this.repo.setNotificationsSeen(userId, Date.now());
 	}
 }

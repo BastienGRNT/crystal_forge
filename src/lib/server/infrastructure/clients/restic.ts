@@ -76,6 +76,30 @@ export class ResticClient implements OffsiteApi {
 	dump(snapshotId: string, path: string, maxBytes: number): Promise<Buffer> {
 		return this.#run(['dump', snapshotId, path], { maxBytes });
 	}
+	dumpStream(snapshotId: string, path: string): ReadableStream<Uint8Array> {
+		const child = spawn('restic', ['dump', snapshotId, path], { env: this.#env, stdio: ['ignore', 'pipe', 'pipe'] });
+		let err = '';
+		child.stderr.on('data', (b: Buffer) => (err = (err + b.toString()).slice(-2000)));
+		const timer = setTimeout(() => child.kill('SIGTERM'), TIMEOUT_MS);
+		return new ReadableStream<Uint8Array>({
+			start(controller) {
+				child.stdout.on('data', (b: Buffer) => controller.enqueue(new Uint8Array(b)));
+				child.on('error', (e) => {
+					clearTimeout(timer);
+					controller.error(e);
+				});
+				child.on('close', (code) => {
+					clearTimeout(timer);
+					if (code === 0) controller.close();
+					else controller.error(new Error(`restic dump : ${err.trim().split('\n').slice(-2).join(' ') || `code ${code}`}`));
+				});
+			},
+			cancel() {
+				clearTimeout(timer);
+				child.kill('SIGTERM');
+			}
+		});
+	}
 	async forget(args: string[]): Promise<void> {
 		await this.#run(['forget', ...args]);
 	}

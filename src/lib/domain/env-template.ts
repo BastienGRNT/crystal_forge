@@ -5,6 +5,13 @@
 import { parseEnv } from './env-file';
 
 export const ENV_TEMPLATE_FILES = ['.env.example', '.env.sample', '.env.template', '.env.dist', '.env.defaults', 'example.env'] as const;
+/** Modèles propres au développement, cherchés en premier pour un projet de dev. */
+export const DEV_ENV_TEMPLATE_FILES = ['.env.development', '.env.development.example', '.env.dev', '.env.dev.example', '.env.development.local', '.env.local.example'] as const;
+
+/** Ordre de recherche du modèle de .env selon l'environnement du projet. */
+export function envTemplateCandidates(environment: 'production' | 'development'): readonly string[] {
+	return environment === 'development' ? [...DEV_ENV_TEMPLATE_FILES, ...ENV_TEMPLATE_FILES] : ENV_TEMPLATE_FILES;
+}
 
 export type EnvVarKind = 'secret' | 'url' | 'port' | 'plain';
 

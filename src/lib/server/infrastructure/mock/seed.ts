@@ -5,7 +5,7 @@
 import type { ForgeServices } from '$server/application/services';
 import { envAad } from '$server/application/services';
 import type { Db } from '../db/client';
-import { domains, jobLogs, jobs, jobSteps, projects, resources } from '../db/schema';
+import { domains, jobLogs, jobs, jobSteps, notifications, projects, resources, spaceMembers, spaces, uptimeChecks } from '../db/schema';
 import { FIREWALL_OPTIONS } from '$lib/domain/firewall';
 import { firewallPlan } from '$server/application/jobs/steps/firewall';
 import { world } from './world';
@@ -38,12 +38,21 @@ export function seedMockDatabase(s: ForgeServices, db: Db): void {
 		'network.reservedIps': '10.10.10.1,10.10.10.2,10.10.10.15,10.10.10.50,10.10.10.200'
 	} as const;
 	settings.set(Object.fromEntries(Object.entries(demoSettings).filter(([k]) => !settings.has(k as keyof typeof demoSettings))));
+	db.delete(uptimeChecks).run();
+	db.delete(notifications).run();
+	db.delete(spaceMembers).run();
 	db.delete(jobLogs).run();
 	db.delete(resources).run();
 	db.delete(jobSteps).run();
 	db.delete(jobs).run();
 	db.delete(domains).run();
 	db.delete(projects).run();
+	db.delete(spaces).run();
+
+	// --- Espaces de démonstration (en vrai, aucun espace n'est créé d'office) ---------------
+	const perso = repos.spaces.create({ name: 'Perso', color: 'violet', icon: 'user' });
+	const pro = repos.spaces.create({ name: 'Entreprise', color: 'blue', icon: 'briefcase' });
+	const papa = repos.spaces.create({ name: 'Papa', color: 'amber', icon: 'house' });
 
 	// --- Projet actif ---------------------------------------------------------------------
 	const notes = repos.projects.create({
@@ -64,7 +73,9 @@ export function seedMockDatabase(s: ForgeServices, db: Db): void {
 		size: 'S',
 		ctid: 500,
 		ip: '10.10.10.60',
-		status: 'active'
+		status: 'active',
+		spaceId: perso.id,
+		tags: JSON.stringify(['notes', 'sveltekit'])
 	});
 	repos.projects.update(notes.id, { envEncrypted: cipher.encrypt(DEMO_ENV, envAad(notes.id)), envUpdatedAt: Date.now() - 5 * 86400_000 });
 	repos.domains.create({ projectId: notes.id, fqdn: 'notes.bastiengrnt.fr', zone: 'bastiengrnt.fr', subdomain: 'notes', mode: 'ovh', status: 'active', sslStatus: 'valid', sslExpiresAt: Date.now() + 85 * 86400_000 });
@@ -138,6 +149,22 @@ export function seedMockDatabase(s: ForgeServices, db: Db): void {
 		ctid: 501,
 		ip: '10.10.10.62',
 		status: 'error'
+	});
+	repos.projects.update(lab.id, { spaceId: pro.id, tags: JSON.stringify(['api', 'go']) });
+	repos.projects.create({
+		slug: 'garage-site',
+		name: 'Site du garage',
+		repoOwner: 'BastienGRNT',
+		repoName: 'garage-site',
+		branch: 'main',
+		workdir: '.',
+		deployMode: 'dockerfile',
+		appService: 'app',
+		appPort: 3000,
+		size: 'S',
+		status: 'draft',
+		spaceId: papa.id,
+		tags: JSON.stringify(['vitrine'])
 	});
 	repos.projects.update(lab.id, { envEncrypted: cipher.encrypt('PORT=8080\nLOG_LEVEL=info\nAPI_KEY=demo-cle-api-456\n', envAad(lab.id)), envUpdatedAt: Date.now() - 3600_000 });
 	repos.domains.create({ projectId: lab.id, fqdn: 'lab.bastiengrnt.fr', zone: 'bastiengrnt.fr', subdomain: 'lab', mode: 'ovh', status: 'pending' });

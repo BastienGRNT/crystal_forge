@@ -22,6 +22,7 @@ import { checkEnvAgainst, type ComposeEnvRef } from '$lib/domain/env-template';
 import { findEnvTemplate, type WizardService } from './wizard';
 import type { AuthService, SessionUser } from './auth';
 import { creatorQuotaErrors } from '$lib/domain/creator';
+import { CONSOLE_MAX_OUTPUT, CONSOLE_TIMEOUT_MS, consoleScript, isConsoleCwd, parseConsoleOutput, validateConsoleCommand } from '$lib/domain/console';
 import { firewallPlan } from '../jobs/steps/firewall';
 
 export interface DomainInput {
@@ -235,7 +236,7 @@ export class ProjectService {
 	async envTemplateCheck(p: ProjectRow) {
 		try {
 			const api = this.s.github.api;
-			const template = await findEnvTemplate(api, p.repoOwner, p.repoName, p.workdir, p.branch);
+			const template = await findEnvTemplate(api, p.repoOwner, p.repoName, p.workdir, p.branch, undefined, p.environment === 'development' ? 'development' : 'production');
 			let refs: ComposeEnvRef[] = [];
 			if (p.deployMode === 'compose' && p.composeFile) {
 				const file = await api.getFile(p.repoOwner, p.repoName, repoPath(p.workdir, p.composeFile), p.branch);
@@ -301,6 +302,17 @@ export class ProjectService {
 		return this.engine.enqueue({ type: 'redeploy', projectId: p.id, params: { forceDispatch: true } }).id;
 	}
 
+	/** Remet en ligne un commit déjà déployé (même chemin qu'un redéploiement, commit imposé). */
+	rollbackTo(p: ProjectRow, sha: string, known: string[]): number {
+		this.#assertNoActiveJob(p);
+		if (p.buildMode !== 'builder') throw new UserFacingError('Le retour arrière en un clic demande le CT de build : migrez d’abord ce projet.');
+		if (!/^[0-9a-f]{40}$/.test(sha) || !known.includes(sha)) throw new UserFacingError('Version inconnue : seul un commit déjà déployé par Forge peut être remis en ligne.');
+		if (sha === p.deployedSha) throw new UserFacingError('Cette version est déjà en ligne.');
+		// Sinon le déploiement auto remettrait aussitôt le dernier commit de la branche.
+		if (p.autoDeploy) this.s.repos.projects.update(p.id, { autoDeploy: false });
+		return this.engine.enqueue({ type: 'redeploy', projectId: p.id, params: { forceDispatch: true, sha, rollback: true } }).id;
+	}
+
 	/** Passe un projet du runner GitHub au CT de build (déploiement, puis retrait du runner). */
 	migrateToBuilder(p: ProjectRow): number {
 		this.#assertNoActiveJob(p);
@@ -319,6 +331,39 @@ export class ProjectService {
 
 	setAutoDeploy(p: ProjectRow, on: boolean): void {
 		this.s.repos.projects.update(p.id, { autoDeploy: on });
+	}
+
+	/**
+	 * Console web (admin) : une commande, en root, dans le CT du projet. Passe par le garde
+	 * (DRY_RUN : rien n'est exécuté) et par la liste des commandes interdites.
+	 */
+	async consoleExec(p: ProjectRow, cwd: string, command: string): Promise<{ output: string; code: number | null; cwd: string; simulated: boolean }> {
+		const bad = validateConsoleCommand(command);
+		if (bad) throw new UserFacingError(bad);
+		if (!p.ip || !p.ctid) throw new UserFacingError("Ce projet n'a pas encore de conteneur.");
+		const dir = isConsoleCwd(cwd) ? cwd : projectDir(p);
+		const simulated = this.s.guard.isDryRun();
+		const res = await this.s.shell.run({ ip: p.ip, sshHostKey: p.sshHostKey }, 'root', consoleScript(dir, command), {
+			summary: `console : ${command.trim()}`,
+			timeoutMs: CONSOLE_TIMEOUT_MS
+		});
+		if (simulated) return { output: '[DRY-RUN] Commande journalisée mais pas exécutée (mode simulation).', code: null, cwd: dir, simulated };
+		const parsed = parseConsoleOutput(res.stdout, dir);
+		const out = (parsed.output + (res.stderr ? (parsed.output ? '\n' : '') + res.stderr : '')).slice(-CONSOLE_MAX_OUTPUT);
+		return { output: out, code: parsed.code ?? res.code, cwd: parsed.cwd, simulated };
+	}
+
+	backupContainer(p: ProjectRow): number {
+		this.#assertNoActiveJob(p);
+		if (!p.ctid) throw new UserFacingError('Le projet n’a pas encore de CT.');
+		return this.engine.enqueue({ type: 'backup_ct', projectId: p.id, params: {} }).id;
+	}
+
+	async restoreContainer(p: ProjectRow, volid: string): Promise<number> {
+		this.#assertNoActiveJob(p);
+		if (!p.ctid) throw new UserFacingError('Le projet n’a pas encore de CT.');
+		if (!(await this.s.proxmox.listBackups(p.ctid, { fresh: true })).some((b) => b.volid === volid)) throw new UserFacingError('Sauvegarde introuvable.');
+		return this.engine.enqueue({ type: 'restore_ct', projectId: p.id, params: { volid } }).id;
 	}
 
 	cleanContainer(p: ProjectRow): number {

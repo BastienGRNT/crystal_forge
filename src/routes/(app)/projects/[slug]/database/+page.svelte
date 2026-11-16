@@ -386,7 +386,7 @@
 		<!-- Copies hors serveur -->
 		<SectionCard
 			title="Copies hors serveur (R2)"
-			description="Chiffrées, une par jour (7 jours, 4 semaines, 6 mois). « Rapatrier » ajoute la copie à la liste ci-dessus ; vous la restaurez ensuite."
+			description="Chiffrées, une par jour (7 jours, 4 semaines, 5 mois : 16 au plus). « Rapatrier » ajoute la copie à la liste ci-dessus ; « Télécharger » vous la donne en clair."
 			icon={CloudDownload}
 			bodyClass="p-0"
 		>
@@ -422,6 +422,9 @@
 								<input type="hidden" name="snapshot" value={s.id} />
 								<Button type="submit" size="sm" variant="ghost" disabled={!!fetching || !!data.activeJob}>{#if fetching === s.id}<Spinner />{:else}<CloudDownload />{/if} Rapatrier</Button>
 							</form>
+							{#if data.level === 'admin'}
+								<Button href="/api/offsite/download?snapshot={s.id}" download size="sm" variant="ghost" title="Télécharger la copie déchiffrée (fichier .sql.gz en clair)"><Download /> Télécharger</Button>
+							{/if}
 						</li>
 					{:else}
 						<li class="px-4 py-8 text-center text-sm text-muted-foreground">Aucune copie pour l'instant (la première part dans l'heure qui suit l'activation).</li>

@@ -18,7 +18,7 @@
 			aria-checked={active}
 			onclick={() => (value = s.key)}
 			class={cn(
-				'relative rounded-xl border p-4 text-left transition-all',
+				'relative rounded-lg border p-4 text-left transition-all',
 				active ? 'border-ember/60 bg-ember/5 ring-2 ring-ember/25' : 'hover:border-foreground/20 hover:bg-accent/30'
 			)}
 		>

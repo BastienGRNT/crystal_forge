@@ -1,6 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { forge } from '$server/container';
 import { errorMessage } from '$lib/domain/errors';
+import { readTags } from '$lib/domain/spaces';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = ({ params }) => {
@@ -10,10 +11,23 @@ export const load: PageServerLoad = ({ params }) => {
 	// Comparaison avec ce que Forge produirait aujourd'hui (GitHub, Proxmox, SSH) : en différé.
 	const protection = p.environment === 'development' ? f.projects.devProtection(p).catch(() => null) : Promise.resolve(null);
 	const accessUsers = p.environment === 'development' ? f.projects.devAccessUsers(p).catch(() => null) : Promise.resolve(null);
-	return { resources, upgrade: f.upgrade.view(p), protection, accessUsers };
+	const organize = { spaceId: p.spaceId, tags: readTags(p.tags), spaces: f.spaces.list().map((s) => ({ id: s.id, name: s.name, color: s.color, icon: s.icon })), allTags: f.spaces.allTags(f.repos.projects.list()) };
+	return { resources, upgrade: f.upgrade.view(p), protection, accessUsers, organize };
 };
 
 export const actions: Actions = {
+	/** Espace et étiquettes (rangement, sans effet sur le serveur). */
+	organize: async ({ params, request }) => {
+		const f = forge();
+		const d = await request.formData();
+		const raw = String(d.get('spaceId') ?? '');
+		try {
+			f.spaces.organize(f.projects.get(params.slug).id, raw ? Number(raw) : null, String(d.get('tags') ?? ''));
+		} catch (err) {
+			return fail(400, { error: errorMessage(err) });
+		}
+		return { organized: true };
+	},
 	update: async ({ params, request }) => {
 		const f = forge();
 		const d = await request.formData();

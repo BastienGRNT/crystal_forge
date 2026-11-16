@@ -11,10 +11,12 @@
 	import { Badge } from '$lib/components/atoms/ui/badge';
 	import * as Alert from '$lib/components/atoms/ui/alert';
 	import { ACCESS_LABELS, ACCESS_LEVELS } from '$lib/domain/access';
+	import SpaceBadge from '$lib/components/atoms/space-badge.svelte';
 
 	let { data, form } = $props();
 	const linkUrl = $derived(form && 'link' in form && form.link ? `${page.url.origin}/reset/${form.link.token}` : null);
 	const levelOf = (u: (typeof data.users)[number], projectId: number) => u.projects.find((p) => p.projectId === projectId)?.level ?? '';
+	const spaceLevelOf = (u: (typeof data.users)[number], spaceId: number) => u.spaces.find((s) => s.spaceId === spaceId)?.level ?? '';
 	const when = (ts: number) => new Date(ts).toLocaleString('fr-FR');
 </script>
 
@@ -76,6 +78,24 @@
 					</div>
 					<p class="text-xs text-muted-foreground">Il ne voit que les dépôts GitHub où son compte est collaborateur. Il devient « Édition » sur les projets qu'il crée.</p>
 				</form>
+				{#if data.spaces.length}
+					<div class="space-y-2">
+						<p class="text-xs font-medium text-muted-foreground">Espaces entiers (projets actuels et futurs)</p>
+						<div class="grid gap-2 md:grid-cols-2">
+							{#each data.spaces as sp (sp.id)}
+								<form method="POST" action="?/spaceMember" use:enhance class="flex items-center gap-2">
+									<input type="hidden" name="userId" value={u.id} /><input type="hidden" name="spaceId" value={sp.id} />
+									<SpaceBadge space={sp} class="min-w-0 flex-1 text-sm" />
+									<select name="level" class="h-8 rounded-md border bg-background px-2 text-sm" value={spaceLevelOf(u, sp.id)} onchange={(e) => e.currentTarget.form?.requestSubmit()}>
+										<option value="">Aucun accès</option>
+										{#each ACCESS_LEVELS as l (l)}<option value={l}>{ACCESS_LABELS[l]}</option>{/each}
+									</select>
+								</form>
+							{/each}
+						</div>
+						<p class="text-xs font-medium text-muted-foreground">Projets un par un (le plus haut des deux accès s'applique)</p>
+					</div>
+				{/if}
 				<div class="grid gap-2 md:grid-cols-2">
 					{#each data.projects as p (p.id)}
 						<form method="POST" action="?/member" use:enhance class="flex items-center gap-2">

@@ -2,7 +2,7 @@
  * Sauvegardes hors serveur (Cloudflare R2) : Forge s'en occupe seul.
  *   • base de Forge : toutes les heures (copie cohérente SQLite) ;
  *   • bases des projets : chaque jour (pg_dump / mysqldump dans le CT, sans rien y laisser) ;
- *   • rétention 7 j / 4 sem. / 6 mois, puis test de restauration tous les 30 jours.
+ *   • rétention 7 j / 4 sem. / 5 mois (16 copies max), puis test de restauration tous les 30 jours.
  * Tout est chiffré par restic avant l'envoi. Les écritures passent par le garde (DRY_RUN).
  */
 import { gunzipSync } from 'node:zlib';
@@ -192,6 +192,26 @@ export class OffsiteBackupService {
 		} catch (err) {
 			this.#save({ restoreTest: { at: start, ok: false, error: errorMessage(err) } });
 		}
+	}
+
+	/** Toutes les copies du dépôt, plus récentes d'abord (lecture). */
+	async all(): Promise<OffsiteSnapshot[]> {
+		if (!this.configured() || !(await this.d.gateway.initialized())) return [];
+		return (await this.d.gateway.snapshots()).sort((a, b) => b.time - a.time);
+	}
+
+	/**
+	 * Téléchargement d'une copie, déchiffrée (restic dump). Lecture seule : rien n'est écrit,
+	 * ni sur R2 ni sur le serveur. Réservé à l'admin (route non listée dans access.ts).
+	 */
+	async download(snapshotId: string): Promise<{ filename: string; stream: ReadableStream<Uint8Array> }> {
+		const snap = (await this.all()).find((s) => s.id === snapshotId);
+		if (!snap) throw new UserFacingError('Copie introuvable.');
+		const base = snap.path.replace(/^\//, '');
+		const stamp = new Date(snap.time).toISOString().slice(0, 16).replace(/[:T]/g, '-');
+		const dot = base.indexOf('.');
+		const filename = dot > 0 ? `${base.slice(0, dot)}-${stamp}${base.slice(dot)}` : `${base}-${stamp}`;
+		return { filename, stream: this.d.gateway.dumpStream(snap.id, snap.path) };
 	}
 
 	/** Copies hors serveur de la base d'un projet (lecture). */

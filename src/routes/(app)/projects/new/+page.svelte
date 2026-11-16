@@ -143,7 +143,7 @@
 	);
 	const domainsOk = $derived(domains.length > 0 && domains.every((d) => d.zone.trim() !== ''));
 	const firstFqdn = $derived(domains[0]?.zone ? buildFqdn(domains[0].subdomain, domains[0].zone) : null);
-	const envCheck = $derived(checkEnvAgainst(env, inspection?.envTemplate ?? null, inspection?.compose?.envRefs ?? []));
+	const envCheck = $derived(checkEnvAgainst(env, (environment === 'development' ? inspection?.envTemplateDev : inspection?.envTemplate) ?? null, inspection?.compose?.envRefs ?? []));
 	const envUnresolved = $derived(envCheck.unfilled.length + envCheck.missing.filter((m) => m.from === 'compose').length);
 	const sqlDbs = $derived(inspection?.compose?.databases.filter((d) => isSqlDbKind(d.kind)) ?? []);
 	const migrations = $derived(inspection?.compose?.migrationServices ?? []);
@@ -400,7 +400,7 @@
 		<SectionCard title="6. Variables d'environnement" description="Collez votre .env : il devient le secret ENV_FILE, écrit dans .env à chaque déploiement." icon={KeyRound}>
 			<div class="space-y-4">
 				{#if inspection}
-					<EnvTemplatePanel template={inspection.envTemplate} composeRefs={inspection.compose?.envRefs ?? []} bind:value={env} fqdn={firstFqdn} {appPort} />
+					<EnvTemplatePanel template={environment === 'development' ? inspection.envTemplateDev : inspection.envTemplate} composeRefs={inspection.compose?.envRefs ?? []} bind:value={env} fqdn={firstFqdn} {appPort} />
 				{/if}
 				<EnvEditor bind:value={env} />
 				{#if envUnresolved > 0}

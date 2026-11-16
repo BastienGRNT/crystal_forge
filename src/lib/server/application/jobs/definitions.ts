@@ -19,6 +19,7 @@ import {
 	moveStorageStep,
 	powerStep,
 	removeDomainStep,
+	restoreCtStep,
 	rollbackStep,
 	teardownDnsStep,
 	teardownGithubStep,
@@ -54,6 +55,7 @@ export const STEPS: Record<string, StepDefinition> = Object.fromEntries(
 		teardownDnsStep,
 		destroyCtStep,
 		finalizeStep,
+		restoreCtStep,
 		rollbackStep
 	].map((s) => [s.key, s])
 );
@@ -190,6 +192,17 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
 		type: 'clean_ct',
 		label: 'Nettoyage du CT',
 		steps: () => ['clean_ct']
+	},
+	backup_ct: {
+		type: 'backup_ct',
+		label: 'Sauvegarde du CT',
+		steps: () => ['backup']
+	},
+	restore_ct: {
+		type: 'restore_ct',
+		label: 'Restauration du CT',
+		// Une sauvegarde de l'état actuel d'abord : la restauration reste annulable.
+		steps: () => ['backup', 'restore_ct']
 	},
 	rollback: {
 		type: 'rollback',

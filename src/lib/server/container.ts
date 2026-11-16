@@ -9,6 +9,9 @@ import { ProjectService } from './application/use-cases/projects';
 import { AccountService } from './application/accounts';
 import { routeGithub, routeOvh } from './infrastructure/account-routing';
 import { AuthService } from './application/use-cases/auth';
+import { SpaceService } from './application/use-cases/spaces';
+import { MonitorService } from './application/use-cases/monitor';
+import { NotificationService } from './application/use-cases/notifications';
 import { JobQueries } from './application/use-cases/jobs';
 import { DatabaseService } from './application/use-cases/database';
 import { ServerHealthService } from './application/use-cases/server-health';
@@ -32,7 +35,7 @@ import { generateForgeKeyPair, SshClient } from './infrastructure/clients/ssh';
 import { getConfig } from './infrastructure/config';
 import { SecretBox } from './infrastructure/crypto/secret-box';
 import { openDatabase } from './infrastructure/db/client';
-import { AccountRepo, AuditRepo, AuthRepo, DomainRepo, JobRepo, ProjectRepo, ResourceRepo, SettingsRepo } from './infrastructure/db/repositories';
+import { AccountRepo, AuditRepo, AuthRepo, DomainRepo, JobRepo, NotificationRepo, ProjectRepo, ResourceRepo, SettingsRepo, SpaceRepo, UptimeRepo } from './infrastructure/db/repositories';
 import { createFakeApis } from './infrastructure/mock/fake-apis';
 import { seedMockDatabase } from './infrastructure/mock/seed';
 import { resetWorld } from './infrastructure/mock/world';
@@ -70,6 +73,9 @@ export interface Forge extends ForgeServices {
 	health: ServerHealthService;
 	upgrade: UpgradeService;
 	selfUpdate: SelfUpdateService;
+	spaces: SpaceService;
+	monitor: MonitorService;
+	notifications: NotificationService;
 	isDryRun(): boolean;
 	setDryRun(value: boolean): void;
 	resetMock(): void;
@@ -259,7 +265,7 @@ function build(): Forge {
 		},
 		probe: () => apis().probe,
 		resolver: () => apis().resolver,
-		repos: { projects, domains, jobs, resources }
+		repos: { projects, domains, jobs, resources, spaces: new SpaceRepo(db), uptime: new UptimeRepo(db), notifications: new NotificationRepo(db) }
 	};
 
 	if (config.mode === 'mock') {
@@ -344,6 +350,9 @@ function build(): Forge {
 	const sleep = new SleepService(services);
 	engine.setBeforeJob((projectId) => sleep.beforeJob(projectId));
 	const wizard = new WizardService(services, auth);
+	const notifications = new NotificationService(services);
+	notifications.listenToJobs();
+	const monitor = new MonitorService(services, notifications);
 	const forge: Forge = {
 		...services,
 		engine,
@@ -361,6 +370,9 @@ function build(): Forge {
 		health: new ServerHealthService(services, offsite),
 		upgrade: new UpgradeService(services, engine),
 		selfUpdate: new SelfUpdateService(services, engine),
+		spaces: new SpaceService(services),
+		monitor,
+		notifications,
 		isDryRun,
 		setDryRun(value: boolean) {
 			if (config.mode !== 'mock') throw new Error('Le DRY_RUN ne se change que par variable d’environnement en mode live.');
@@ -406,6 +418,9 @@ function build(): Forge {
 	setInterval(() => void autoDeploy.tick().catch((err) => console.warn(`[auto-deploy] ${err instanceof Error ? err.message : err}`)), AutoDeployService.CHECK_EVERY_MS).unref();
 	// Serveurs de dev : mise en veille après inactivité, réveil par la page d'attente (port à part).
 	setInterval(() => void sleep.tick().catch((err) => console.warn(`[veille] ${err instanceof Error ? err.message : err}`)), SleepService.CHECK_EVERY_MS).unref();
+	// Surveillance des sites (lecture seule) : un relevé par domaine et par minute.
+	if (config.mode === 'mock') monitor.seedDemoHistory();
+	setInterval(() => void monitor.tick().catch((err) => console.warn(`[surveillance] ${err instanceof Error ? err.message : err}`)), MonitorService.CHECK_EVERY_MS).unref();
 	if (config.mode === 'live') {
 		const g = globalThis as unknown as Record<symbol, { close(): void } | undefined>;
 		g[WAKE_KEY]?.close();

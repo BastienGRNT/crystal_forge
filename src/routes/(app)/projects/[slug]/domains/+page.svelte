@@ -8,6 +8,7 @@
 	import Wrench from '@lucide/svelte/icons/wrench';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import SectionCard from '$lib/components/molecules/section-card.svelte';
+	import UptimePanel from '$lib/components/organisms/uptime-panel.svelte';
 	import StatusBadge from '$lib/components/molecules/status-badge.svelte';
 	import ConfirmDialog from '$lib/components/molecules/confirm-dialog.svelte';
 	import DomainEditor, { type DomainRow } from '$lib/components/organisms/domain-editor.svelte';
@@ -80,6 +81,8 @@
 			{/each}
 		</ul>
 	</SectionCard>
+
+	{#if data.domains?.length}<UptimePanel slug={data.project.slug} />{/if}
 
 	<SectionCard title="Ajouter un domaine" description="DNS OVH (enregistrement A vers {data.publicIp}) ou domaine externe à créer à la main." icon={Plus}>
 		{#if !row}

@@ -25,7 +25,7 @@
 <div class="space-y-6">
 	<div class="grid gap-4 md:grid-cols-2">
 		{#each sections as s (s.id)}
-			<div class={cn('rounded-xl border bg-card', s.status === 'error' && 'border-danger/40', s.status === 'warn' && 'border-warning/40')}>
+			<div class={cn('rounded-lg border bg-card', s.status === 'error' && 'border-danger/40', s.status === 'warn' && 'border-warning/40')}>
 				<div class="flex items-center justify-between gap-3 border-b px-4 py-3">
 					<div class="flex items-center gap-2">
 						{@render icon(s.status)}
@@ -47,7 +47,7 @@
 	</div>
 
 	{#if permissions.length}
-		<div class={cn('overflow-hidden rounded-xl border', leaks.length ? 'border-danger/50' : 'border-success/40')}>
+		<div class={cn('overflow-hidden rounded-lg border', leaks.length ? 'border-danger/50' : 'border-success/40')}>
 			<div class={cn('flex items-center gap-3 px-4 py-3', leaks.length ? 'bg-danger/10' : 'bg-success/10')}>
 				{#if leaks.length}<ShieldX class="size-5 text-danger" />{:else}<ShieldCheck class="size-5 text-success" />{/if}
 				<div>

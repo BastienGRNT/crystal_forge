@@ -92,7 +92,21 @@ export interface PveBackupJob {
 	/** Sélection par pool : tous les CT du pool, présents et futurs. */
 	pool: string | null;
 	storage: string | null;
+	/** Rétention (« keep-daily=7,… ») ; absente en démo. */
+	pruneBackups?: string | null;
 }
+
+/** Un point d'historique Proxmox (rrddata, moyenne sur l'intervalle). */
+export interface PveRrdPoint {
+	time: number;
+	cpu: number | null;
+	maxcpu: number | null;
+	mem: number | null;
+	maxmem: number | null;
+	netin: number | null;
+	netout: number | null;
+}
+export type RrdTimeframe = 'hour' | 'day' | 'week';
 
 export interface ProxmoxApi {
 	version(): Promise<{ version: string; release: string }>;
@@ -112,14 +126,18 @@ export interface ProxmoxApi {
 	clusterFirewallOptions(): Promise<Record<string, unknown>>;
 	nodeNetworks(): Promise<PveNetworkIface[]>;
 	backupJobs(): Promise<PveBackupJob[]>;
+	/** Historique CPU/RAM/réseau : du nœud (vmid null) ou d'un CT. */
+	rrd(vmid: number | null, timeframe: RrdTimeframe): Promise<PveRrdPoint[]>;
 
 	clone(sourceId: number, params: PveCloneParams): Promise<string>;
 	updateConfig(vmid: number, config: Record<string, string | number>): Promise<void>;
 	resize(vmid: number, disk: string, size: string): Promise<string | null>;
 	power(vmid: number, action: PowerAction): Promise<string>;
 	moveVolume(vmid: number, volume: string, storage: string): Promise<string>;
+	/** POST /nodes/{node}/lxc avec restore=1, force=1 : remplace le CT (arrêté) par l'archive. */
+	restoreCt(vmid: number, volid: string, storage: string): Promise<string>;
 	destroy(vmid: number): Promise<string>;
-	vzdump(vmid: number, storage: string): Promise<string>;
+	vzdump(vmid: number, storage: string, opts?: { notes?: string; pruneBackups?: string }): Promise<string>;
 	/** POST /cluster/backup (Sys.Modify sur « / » + Datastore.Allocate sur le stockage). */
 	createBackupJob(params: Record<string, string | number>): Promise<void>;
 	/** PUT /cluster/backup/{id}. */
@@ -183,6 +201,13 @@ export interface GhRunJob {
 	steps: { number: number; name: string; status: string; conclusion: string | null }[];
 }
 
+export interface GhCommit {
+	sha: string;
+	message: string;
+	date: string | null;
+	author: string | null;
+}
+
 export interface GithubApi {
 	whoami(): Promise<{ login: string; tokenExpiresAt: string | null }>;
 	listRepos(): Promise<GhRepo[]>;
@@ -207,6 +232,8 @@ export interface GithubApi {
 	ensureEnvironment(owner: string, repo: string, environment: string): Promise<void>;
 	/** Dernier commit d'une branche. */
 	latestCommit(owner: string, repo: string, branch: string): Promise<{ sha: string; message: string; date: string | null }>;
+	/** Commits de head absents de base (GET /repos/{o}/{r}/compare/{base}...{head}). */
+	compareCommits(owner: string, repo: string, base: string, head: string): Promise<{ aheadBy: number; commits: GhCommit[] }>;
 	/** Archive tar.gz du dépôt à un commit donné (dossier racine « owner-repo-sha/ »). */
 	downloadTarball(owner: string, repo: string, ref: string): Promise<Buffer>;
 
@@ -404,6 +431,8 @@ export interface OffsiteApi {
 	snapshotsJson(): Promise<string>;
 	/** Contenu d'un fichier d'un instantané. */
 	dump(snapshotId: string, path: string, maxBytes: number): Promise<Buffer>;
+	/** Même chose, en flux (téléchargement déchiffré, sans tout garder en mémoire). */
+	dumpStream(snapshotId: string, path: string): ReadableStream<Uint8Array>;
 	/** Rétention (forget --prune). */
 	forget(args: string[]): Promise<void>;
 }

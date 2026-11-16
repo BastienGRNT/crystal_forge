@@ -65,18 +65,18 @@
 	let moreOpen = $state(false);
 </script>
 
-<header class="mb-6 space-y-4">
+<header class="animate-rise mb-6 space-y-4">
 	<div class="flex flex-wrap items-start justify-between gap-4">
 		<div class="min-w-0">
 			<div class="flex flex-wrap items-center gap-2.5">
-				<h1 class="truncate text-2xl font-semibold tracking-tight">{p.name}</h1>
+				<h1 class="truncate text-[24px] leading-tight font-semibold tracking-[-0.025em]">{p.name}</h1>
 				<StatusBadge status={p.status} />
-				<span class={cn('rounded-md px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase', p.environment === 'development' ? 'bg-info/12 text-info' : 'bg-muted text-muted-foreground')}>
+				<span class={cn('rounded-sm px-1.5 py-px font-mono text-[10px] font-medium tracking-wider uppercase ring-1 ring-inset', p.environment === 'development' ? 'bg-info/10 text-info ring-info/25' : 'bg-foreground/[0.04] text-muted-foreground ring-border')}>
 					{p.environment === 'development' ? 'dev' : 'prod'}
 				</span>
-				{#if p.sleepingSince}<span class="inline-flex items-center gap-1 rounded-md bg-info/12 px-1.5 py-0.5 text-xs text-info"><Moon class="size-3" /> En veille</span>{/if}
+				{#if p.sleepingSince}<span class="inline-flex items-center gap-1 rounded-sm bg-info/10 px-1.5 py-px text-xs text-info ring-1 ring-info/25 ring-inset"><Moon class="size-3" /> En veille</span>{/if}
 			</div>
-			<div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+			<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
 				{#if site}
 					<a href={site} target="_blank" rel="noreferrer" class="inline-flex items-center gap-1 font-mono hover:text-ember">{primary}<ArrowUpRight class="size-3" /></a>
 				{/if}
@@ -137,7 +137,7 @@
 		<a
 			href="/jobs/{data.activeJob.id}"
 			class={cn(
-				'flex items-center gap-3 rounded-xl border px-4 py-2.5 text-sm transition-colors',
+				'flex items-center gap-3 rounded-lg border px-4 py-2.5 text-sm transition-colors',
 				waiting ? 'border-warning/40 bg-warning/5 hover:bg-warning/10' : 'border-info/30 bg-info/5 hover:bg-info/10'
 			)}
 		>
@@ -151,19 +151,21 @@
 		</a>
 	{/if}
 
-	<nav class="scrollbar-thin -mx-1 flex gap-0.5 overflow-x-auto border-b px-1" aria-label="Sections du projet">
+	<nav class="scrollbar-none -mx-1 flex gap-0.5 overflow-x-auto border-b px-1" aria-label="Sections du projet">
 		{#each tabs as t (t.href)}
 			{@const active = isActive(t)}
 			<a
 				href={t.href}
 				class={cn(
-					'-mb-px inline-flex shrink-0 items-center gap-2 border-b-2 px-3 pt-1 pb-2.5 text-sm font-medium transition-colors',
+					'group/tab relative -mb-px inline-flex shrink-0 items-center gap-1.5 border-b px-1 pt-0.5 pb-2 text-[13px] font-medium transition-colors',
 					active ? 'border-ember text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
 				)}
 				aria-current={active ? 'page' : undefined}
 			>
-				<t.icon class="size-4" />
-				{t.label}
+				<span class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors group-hover/tab:bg-foreground/[0.05]">
+					<t.icon class={cn('size-3.5', active ? 'text-ember' : '')} />
+					{t.label}
+				</span>
 			</a>
 		{/each}
 	</nav>

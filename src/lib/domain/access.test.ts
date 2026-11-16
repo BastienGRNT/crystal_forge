@@ -74,3 +74,18 @@ describe('formActionName', () => {
 		expect(formActionName('')).toBe('');
 	});
 });
+
+describe('nouvelles routes sensibles', () => {
+	it('console web et téléchargement R2 : admin uniquement', () => {
+		expect(requirementFor('POST', '/api/projects/blog/console').kind).toBe('admin');
+		expect(requirementFor('GET', '/api/offsite/download', '?snapshot=abcd1234').kind).toBe('admin');
+	});
+	it('restauration de CT : admin ; sauvegarde : édition ; retour arrière : déploiement', () => {
+		expect(requirementFor('POST', '/projects/blog/container', '?/restore').kind).toBe('admin');
+		expect(requirementFor('POST', '/projects/blog/container', '?/backup')).toEqual({ kind: 'project', slug: 'blog', level: 'edit' });
+		expect(requirementFor('POST', '/projects/blog/deployments', '?/rollback')).toEqual({ kind: 'project', slug: 'blog', level: 'deploy' });
+	});
+	it('graphiques, surveillance et commits : lecture', () => {
+		for (const k of ['metrics', 'uptime', 'commits']) expect(requirementFor('GET', `/api/projects/blog/${k}`)).toEqual({ kind: 'project', slug: 'blog', level: 'read' });
+	});
+});

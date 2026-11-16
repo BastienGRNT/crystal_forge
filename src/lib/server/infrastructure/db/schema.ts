@@ -61,9 +61,72 @@ export const projects = sqliteTable(
 		status: text('status', { enum: ['draft', 'deploying', 'active', 'error', 'deleting', 'deleted'] })
 			.notNull()
 			.default('draft'),
+		/** Espace (Papa, Perso, Entreprise…) ; null : hors espace (pas d'espace par défaut). */
+		spaceId: integer('space_id').references((): AnySQLiteColumn => spaces.id, { onDelete: 'set null' }),
+		/** Étiquettes libres (JSON : string[]). */
+		tags: text('tags').notNull().default('[]'),
 		...timestamps
 	},
 	(t) => [uniqueIndex('projects_slug_idx').on(t.slug)]
+);
+
+/** Espaces : regroupent des projets (couleur + icône), et peuvent être partagés entiers à un collaborateur. */
+export const spaces = sqliteTable('spaces', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	name: text('name').notNull(),
+	color: text('color').notNull().default('blue'),
+	icon: text('icon').notNull().default('folder'),
+	position: integer('position').notNull().default(0),
+	...timestamps
+});
+
+/** Accès d'un collaborateur à tout un espace (s'ajoute aux accès par projet, le plus haut gagne). */
+export const spaceMembers = sqliteTable(
+	'space_members',
+	{
+		userId: integer('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+		spaceId: integer('space_id')
+			.notNull()
+			.references(() => spaces.id, { onDelete: 'cascade' }),
+		level: text('level', { enum: ['read', 'deploy', 'edit'] }).notNull(),
+		createdAt: integer('created_at').notNull().default(now)
+	},
+	(t) => [primaryKey({ columns: [t.userId, t.spaceId] })]
+);
+
+/** Surveillance des sites : un relevé par domaine et par minute, gardé 7 jours. */
+export const uptimeChecks = sqliteTable(
+	'uptime_checks',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		domainId: integer('domain_id')
+			.notNull()
+			.references(() => domains.id, { onDelete: 'cascade' }),
+		ts: integer('ts').notNull(),
+		ok: integer('ok', { mode: 'boolean' }).notNull(),
+		status: integer('status'),
+		ms: integer('ms'),
+		error: text('error')
+	},
+	(t) => [index('uptime_checks_domain_ts_idx').on(t.domainId, t.ts), index('uptime_checks_ts_idx').on(t.ts)]
+);
+
+/** Centre de notifications : jobs terminés, sites tombés/revenus, sauvegardes. */
+export const notifications = sqliteTable(
+	'notifications',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		ts: integer('ts').notNull(),
+		kind: text('kind', { enum: ['job', 'uptime', 'backup'] }).notNull(),
+		level: text('level', { enum: ['info', 'success', 'warn', 'error'] }).notNull(),
+		projectId: integer('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+		title: text('title').notNull(),
+		body: text('body'),
+		href: text('href')
+	},
+	(t) => [index('notifications_ts_idx').on(t.ts)]
 );
 
 export const domains = sqliteTable(
@@ -197,6 +260,8 @@ export const users = sqliteTable(
 		githubLogin: text('github_login'),
 		/** Chaque création attend la validation d'un admin. */
 		requiresApproval: integer('requires_approval', { mode: 'boolean' }).notNull().default(true),
+		/** Dernière ouverture de la cloche (ms) : les notifications plus récentes sont « non lues ». */
+		notificationsSeenAt: integer('notifications_seen_at').notNull().default(0),
 		...timestamps
 	},
 	(t) => [uniqueIndex('users_username_idx').on(t.username)]
@@ -276,6 +341,9 @@ export const sessions = sqliteTable('sessions', {
 export type ProjectRow = typeof projects.$inferSelect;
 export type UserRow = typeof users.$inferSelect;
 export type MemberRow = typeof projectMembers.$inferSelect;
+export type SpaceRow = typeof spaces.$inferSelect;
+export type SpaceMemberRow = typeof spaceMembers.$inferSelect;
+export type NotificationRow = typeof notifications.$inferSelect;
 export type AccountRow = typeof accounts.$inferSelect;
 export type DomainRow = typeof domains.$inferSelect;
 export type JobRow = typeof jobs.$inferSelect;

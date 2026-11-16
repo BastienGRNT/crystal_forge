@@ -26,14 +26,14 @@
 
 <div class={cn('flex flex-col gap-2.5', className)}>
 	<div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-		<span class="inline-flex items-center gap-1.5 font-medium">
+		<span class="label-caps inline-flex items-center gap-1.5">
 			{#if Icon}<Icon class="size-3.5" />{/if}
 			{label}
 		</span>
 		{#if hint}<span class={cn('font-medium', TONE_TEXT[tone])}>{hint}</span>{/if}
 	</div>
 	<div class="flex items-baseline gap-1.5">
-		<span class="text-2xl font-semibold tracking-tight tabular-nums">{value}</span>
+		<span class="font-mono text-2xl font-medium tracking-tight tabular-nums">{value}</span>
 		{#if detail}<span class="text-xs text-muted-foreground tabular-nums">{detail}</span>{/if}
 	</div>
 	<Meter value={ratio} />

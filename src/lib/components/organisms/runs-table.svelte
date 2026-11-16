@@ -38,7 +38,7 @@
 	const EVENT: Record<string, string> = { push: 'push', workflow_dispatch: 'manuel' };
 </script>
 
-<ul class="divide-y overflow-hidden rounded-xl border bg-card">
+<ul class="divide-y overflow-hidden rounded-lg border bg-card">
 	{#each runs as run (run.id)}
 		{@const st = runStatus(run.status, run.conclusion)}
 		<li>

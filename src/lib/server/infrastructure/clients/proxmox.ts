@@ -16,7 +16,9 @@ import type {
 	PveNetworkIface,
 	PvePermissions,
 	PveStorageStatus,
-	PveTaskStatus
+	PveTaskStatus,
+	PveRrdPoint,
+	RrdTimeframe
 } from '$server/application/ports';
 import { httpRequest, isTlsError, parseJson, proxmoxDispatcher } from './http';
 
@@ -236,7 +238,7 @@ export class ProxmoxClient implements ProxmoxApi {
 	}
 
 	async backupJobs(): Promise<PveBackupJob[]> {
-		const rows = await this.#call<{ id: string; enabled?: number; schedule?: string; vmid?: string; all?: number; pool?: string; storage?: string }[]>('GET', '/cluster/backup');
+		const rows = await this.#call<{ id: string; enabled?: number; schedule?: string; vmid?: string; all?: number; pool?: string; storage?: string; 'prune-backups'?: string | Record<string, unknown> }[]>('GET', '/cluster/backup');
 		return rows.map((r) => ({
 			id: r.id,
 			enabled: r.enabled !== 0,
@@ -244,7 +246,8 @@ export class ProxmoxClient implements ProxmoxApi {
 			vmid: r.vmid ?? null,
 			all: r.all === 1,
 			pool: r.pool ?? null,
-			storage: r.storage ?? null
+			storage: r.storage ?? null,
+			pruneBackups: pruneString(r['prune-backups'])
 		}));
 	}
 
@@ -281,14 +284,34 @@ export class ProxmoxClient implements ProxmoxApi {
 		return this.#call<string>('DELETE', `/nodes/${this.#node}/lxc/${vmid}`, { purge: 1, 'destroy-unreferenced-disks': 1 });
 	}
 
-	vzdump(vmid: number, storage: string) {
+	vzdump(vmid: number, storage: string, opts: { notes?: string; pruneBackups?: string } = {}) {
 		return this.#call<string>('POST', `/nodes/${this.#node}/vzdump`, {
 			vmid: String(vmid),
 			storage,
 			mode: 'snapshot',
 			compress: 'zstd',
-			'notes-template': '{{guestname}} — sauvegarde Forge avant suppression'
+			'notes-template': `{{guestname}} — ${opts.notes ?? 'sauvegarde Forge avant suppression'}`,
+			...(opts.pruneBackups ? { 'prune-backups': opts.pruneBackups } : {})
 		});
+	}
+
+	restoreCt(vmid: number, volid: string, storage: string) {
+		return this.#call<string>('POST', `/nodes/${this.#node}/lxc`, { vmid, ostemplate: volid, restore: 1, force: 1, storage });
+	}
+
+	async rrd(vmid: number | null, timeframe: RrdTimeframe): Promise<PveRrdPoint[]> {
+		const path = vmid === null ? `/nodes/${this.#node}/rrddata` : `/nodes/${this.#node}/lxc/${vmid}/rrddata`;
+		const rows = await this.#call<Record<string, number | undefined>[]>('GET', path, { timeframe, cf: 'AVERAGE' });
+		const n = (v: number | undefined) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+		return rows.map((r) => ({
+			time: r.time ?? 0,
+			cpu: n(r.cpu),
+			maxcpu: n(r.maxcpu),
+			mem: n(r.mem ?? r.memused),
+			maxmem: n(r.maxmem ?? r.memtotal),
+			netin: n(r.netin),
+			netout: n(r.netout)
+		}));
 	}
 
 	async createBackupJob(params: Record<string, string | number>) {
@@ -311,4 +334,13 @@ export class ProxmoxClient implements ProxmoxApi {
 	async deleteCtFirewallRule(vmid: number, pos: number) {
 		await this.#call('DELETE', `/nodes/${this.#node}/lxc/${vmid}/firewall/rules/${pos}`);
 	}
+}
+
+/** Proxmox renvoie prune-backups en chaîne (« keep-daily=7,… ») ou en objet selon la version. */
+function pruneString(v: string | Record<string, unknown> | undefined): string | null {
+	if (v === undefined || v === null) return null;
+	if (typeof v === 'string') return v;
+	return Object.entries(v)
+		.map(([k, x]) => `${k}=${String(x)}`)
+		.join(',');
 }

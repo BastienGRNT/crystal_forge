@@ -300,6 +300,20 @@ export class GithubClient implements GithubApi {
 		}
 	}
 
+	async compareCommits(owner: string, repo: string, base: string, head: string) {
+		try {
+			const d = (await this.#o.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${base}...${head}`, per_page: 50 })).data;
+			return {
+				aheadBy: d.ahead_by,
+				commits: d.commits
+					.map((c) => ({ sha: c.sha, message: c.commit.message, date: c.commit.committer?.date ?? null, author: c.author?.login ?? c.commit.author?.name ?? null }))
+					.reverse()
+			};
+		} catch (e) {
+			wrap(e, `comparaison ${base.slice(0, 7)}…${head.slice(0, 7)} de ${owner}/${repo}`);
+		}
+	}
+
 	async downloadTarball(owner: string, repo: string, ref: string) {
 		try {
 			const res = await this.#o.rest.repos.downloadTarballArchive({ owner, repo, ref });

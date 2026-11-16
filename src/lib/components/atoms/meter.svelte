@@ -14,11 +14,11 @@
 </script>
 
 <div
-	class={cn('w-full overflow-hidden rounded-full bg-muted', size === 'sm' ? 'h-1' : 'h-1.5', className)}
+	class={cn('w-full overflow-hidden rounded-[2px] bg-foreground/[0.07]', size === 'sm' ? 'h-1' : 'h-1.5', className)}
 	role="progressbar"
 	aria-valuemin={0}
 	aria-valuemax={100}
 	aria-valuenow={Math.round(ratio * 100)}
 >
-	<div class={cn('h-full rounded-full transition-[width] duration-700 ease-out', TONE_BG[t])} style:width="{ratio * 100}%"></div>
+	<div class={cn('h-full rounded-[2px] transition-[width] duration-700 ease-out', TONE_BG[t])} style:width="{ratio * 100}%"></div>
 </div>

@@ -14,7 +14,9 @@ import { SafetyViolation } from './errors';
 
 /** Stockage dédié aux sauvegardes de Forge (créé par bootstrap.sh) : Forge n'a pas Datastore.Allocate ailleurs. */
 export const FORGE_BACKUP_STORAGE = 'forge-backups';
-export const BACKUP_RETENTION = 'keep-daily=7,keep-weekly=4';
+/** Au plus 16 sauvegardes par CT : 7 jours + 4 semaines + 5 mois (vzdump applique la même règle aux sauvegardes manuelles). */
+export const BACKUP_RETENTION = 'keep-daily=7,keep-weekly=4,keep-monthly=5';
+export const BACKUP_MAX_PER_CT = 16;
 export const BACKUP_JOB_CRITICAL = 'forge-prod-daily';
 export const BACKUP_JOB_PROJECTS = 'forge-projects-daily';
 
@@ -26,6 +28,19 @@ export const CRITICAL_MIN_MEMORY_MB = 1024;
 export const CRITICAL_MAX_MEMORY_MB = 4096;
 /** RAM disponible à garder sur l'hôte après une augmentation. */
 export const HOST_RAM_RESERVE_MB = 2048;
+
+/**
+ * Garde-fou d'une restauration vzdump : uniquement une archive de CE CT, jamais un CT critique,
+ * et seulement un CT créé par Forge (la restauration écrase tout le disque du CT).
+ */
+export function assertSafeCtRestore(o: { vmid: number; volid: string; criticalCtids: number[]; ownedByForge: boolean }): void {
+	if (!Number.isInteger(o.vmid) || o.vmid <= 0) throw new SafetyViolation('restore.vmid', 'CT invalide.');
+	if (o.criticalCtids.includes(o.vmid)) throw new SafetyViolation('restore.critical', `Le CT ${o.vmid} est critique (NPM, Forge) : Forge ne le restaure jamais.`);
+	if (!o.ownedByForge) throw new SafetyViolation('restore.owner', `Le CT ${o.vmid} n'a pas été créé par Forge.`);
+	const m = /^[a-z0-9][a-z0-9_.-]*:backup\/vzdump-lxc-(\d+)-[0-9_-]+\.tar(?:\.(?:zst|gz|lzo))?$/.exec(o.volid);
+	if (!m) throw new SafetyViolation('restore.volid', `Archive refusée : ${o.volid}`);
+	if (Number(m[1]) !== o.vmid) throw new SafetyViolation('restore.other-ct', `Cette archive appartient au CT ${m[1]}, pas au CT ${o.vmid}.`);
+}
 
 export interface DesiredBackupJob {
 	id: string;
@@ -56,7 +71,12 @@ export interface CurrentBackupJob {
 	vmid: string | null;
 	pool: string | null;
 	storage: string | null;
+	/** Rétention actuelle du job (absente : on ne la compare pas). */
+	pruneBackups?: string | null;
 }
+
+const samePrune = (a: string | null | undefined, b: string) =>
+	a === undefined || (a ?? '').split(',').map((x) => x.trim()).filter(Boolean).sort().join(',') === b.split(',').sort().join(',');
 
 const sameIds = (a: string | null | undefined, b: string | null | undefined) =>
 	(a ?? '').split(',').filter(Boolean).map(Number).sort((x, y) => x - y).join(',') === (b ?? '').split(',').filter(Boolean).map(Number).sort((x, y) => x - y).join(',');
@@ -66,7 +86,7 @@ export function backupJobChanges(current: CurrentBackupJob[], desired: DesiredBa
 	return desired.flatMap((job): { job: DesiredBackupJob; exists: boolean }[] => {
 		const cur = current.find((c) => c.id === job.id);
 		if (!cur) return [{ job, exists: false }];
-		const same = cur.enabled && cur.schedule === job.schedule && cur.storage === job.storage && sameIds(cur.vmid, job.vmid) && (cur.pool ?? undefined) === job.pool;
+		const same = cur.enabled && cur.schedule === job.schedule && cur.storage === job.storage && sameIds(cur.vmid, job.vmid) && (cur.pool ?? undefined) === job.pool && samePrune(cur.pruneBackups, job['prune-backups']);
 		return same ? [] : [{ job, exists: true }];
 	});
 }

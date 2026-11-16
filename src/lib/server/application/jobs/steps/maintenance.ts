@@ -200,6 +200,32 @@ export const moveStorageStep: StepDefinition = {
 	}
 };
 
+/** Restauration d'une sauvegarde vzdump : arrêt, remplacement du disque, redémarrage. */
+export const restoreCtStep: StepDefinition = {
+	key: 'restore_ct',
+	label: 'Restauration de la sauvegarde',
+	async run(ctx) {
+		const { proxmox } = ctx.services;
+		const p = ctx.project();
+		if (!p.ctid) throw new Error('Projet sans CT.');
+		const volid = String(ctx.params.volid ?? '');
+		if (!ctx.dryRun && !(await proxmox.listBackups(p.ctid, { fresh: true })).some((b) => b.volid === volid)) throw new Error(`Sauvegarde introuvable : ${volid}`);
+		const storage = rootfsStorage(String((await proxmox.guestConfig(p.ctid)).rootfs ?? ''));
+		if (!storage) throw new Error('Stockage du disque du CT illisible.');
+		const wasRunning = (await proxmox.guests()).find((g) => g.vmid === p.ctid)?.status === 'running';
+		if (wasRunning && !ctx.state.stopped) {
+			await proxmox.waitTask(await proxmox.power(p.ctid, 'shutdown'), { timeoutMs: 3 * 60_000 });
+			ctx.state.stopped = true;
+			ctx.save();
+			ctx.log('info', `CT ${p.ctid} éteint (le site est coupé pendant la restauration).`);
+		}
+		await proxmox.waitTask(await proxmox.restore(p.ctid, volid, storage), { timeoutMs: 60 * 60_000, onLine: (l) => ctx.log('debug', l.slice(0, 400)) });
+		ctx.log('success', `CT ${p.ctid} restauré depuis ${volid}.`);
+		await proxmox.waitTask(await proxmox.power(p.ctid, 'start'), { timeoutMs: 3 * 60_000 });
+		ctx.log('info', `CT ${p.ctid} rallumé.`);
+	}
+};
+
 export const removeDomainStep: StepDefinition = {
 	key: 'remove_domain',
 	label: 'Retrait du domaine',
@@ -233,7 +259,8 @@ export const backupStep: StepDefinition = {
 			ctx.log('info', 'Sauvegarde déjà faite (reprise).');
 			return;
 		}
-		const upid = await ctx.services.proxmox.backup(p.ctid);
+		const notes = ctx.job.type === 'backup_ct' ? 'sauvegarde manuelle' : ctx.job.type === 'restore_ct' ? 'avant restauration' : undefined;
+		const upid = await ctx.services.proxmox.backup(p.ctid, notes);
 		ctx.log('info', 'Sauvegarde en cours (le CT est brièvement suspendu)…');
 		// Un CT qui écrit pendant la sauvegarde (build Docker…) produit des milliers de « file has vanished » :
 		// on les compte au lieu de tous les journaliser (le journal et la page en saturent).

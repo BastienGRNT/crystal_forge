@@ -15,6 +15,11 @@
 	import { Button } from '$lib/components/atoms/ui/button';
 	import * as Alert from '$lib/components/atoms/ui/alert';
 	import Spinner from '$lib/components/atoms/spinner.svelte';
+	import History from '@lucide/svelte/icons/history';
+	import Undo2 from '@lucide/svelte/icons/undo-2';
+	import RelativeTime from '$lib/components/molecules/relative-time.svelte';
+	import ConfirmDialog from '$lib/components/molecules/confirm-dialog.svelte';
+	import { goto } from '$app/navigation';
 
 	let { data } = $props();
 	// Un job de ce projet change de statut (lancé ici, ailleurs ou automatiquement) : on recharge.
@@ -23,6 +28,8 @@
 		if (e.slug === data.project.slug) reloadRuns();
 	});
 	let pending = $state(false);
+	let target = $state<{ sha: string; at: number } | null>(null);
+	let rollbackForm = $state<HTMLFormElement | null>(null);
 	onMount(() => {
 		const t = setInterval(() => {
 			if (data.runs.some((r) => r.status !== 'completed')) void invalidate('forge:runs');
@@ -50,6 +57,56 @@
 				</form>
 			</div>
 		</SectionCard>
+
+		<SectionCard title="Versions déjà mises en ligne" description="Un clic remet une ancienne version en ligne (reconstruite depuis ce commit). Le déploiement automatique est alors mis en pause, sinon il remettrait aussitôt la dernière version." icon={History} bodyClass="p-0">
+			{#if data.versions.length === 0}
+				<p class="px-4 py-5 text-sm text-muted-foreground">Aucune version enregistrée : la liste se remplit à chaque déploiement réussi.</p>
+			{:else}
+				<ol class="relative divide-y">
+					{#each data.versions as v, i (v.sha)}
+						{@const live = v.sha === data.build.deployedSha}
+						<li class="flex items-center gap-3 px-4 py-2.5 text-sm">
+							<span class="relative flex size-4 shrink-0 items-center justify-center">
+								<span class={live ? 'size-2.5 rounded-full bg-success glow text-success' : 'size-2 rounded-full border border-muted-foreground/50'}></span>
+							</span>
+							<a href="https://github.com/{data.project.repoOwner}/{data.project.repoName}/commit/{v.sha}" target="_blank" rel="noreferrer" class="font-mono text-xs hover:text-ember">{v.sha.slice(0, 7)}</a>
+							<span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+								<RelativeTime value={v.at} /> · <a href="/jobs/{v.jobId}" class="hover:text-foreground">job #{v.jobId}</a>
+								{#if v.rollback}<span class="ml-1 rounded bg-warning/10 px-1 text-[10px] text-warning">retour arrière</span>{/if}
+								{#if i === 0 && !live}<span class="ml-1 text-[10px]">(plus récente)</span>{/if}
+							</span>
+							{#if live}
+								<span class="rounded-sm bg-success/10 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-success uppercase">en ligne</span>
+							{:else}
+								<Button size="sm" variant="outline" class="h-7 text-xs" disabled={!!data.activeJob} onclick={() => (target = { sha: v.sha, at: v.at })}><Undo2 /> Remettre en ligne</Button>
+							{/if}
+						</li>
+					{/each}
+				</ol>
+			{/if}
+		</SectionCard>
+		<form
+			method="POST"
+			action="?/rollback"
+			bind:this={rollbackForm}
+			class="hidden"
+			use:enhance={() => async ({ result }) => {
+				if (result.type === 'redirect') void goto(result.location);
+				else if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? 'Retour arrière impossible');
+			}}
+		>
+			<input type="hidden" name="sha" value={target?.sha ?? ''} />
+		</form>
+		<ConfirmDialog
+			bind:open={() => !!target, (v) => { if (!v) target = null; }}
+			title="Remettre en ligne {target?.sha.slice(0, 7)} ?"
+			description="Forge reconstruit cette version et la met en ligne à la place de l'actuelle. Les données (base, fichiers) ne sont pas touchées. Le déploiement automatique est mis en pause : réactivez-le quand le correctif est poussé."
+			confirmLabel="Remettre en ligne"
+			onConfirm={() => {
+				rollbackForm?.requestSubmit();
+				target = null;
+			}}
+		/>
 	{:else}
 	{#if data.build.hasCt}
 		<Alert.Root class="border-warning/40">

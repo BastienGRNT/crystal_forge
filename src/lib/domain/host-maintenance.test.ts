@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertSafeBackupJob, assertSafeCriticalCtTune, backupJobChanges, criticalCtPlan, desiredBackupJobs } from './host-maintenance';
+import { assertSafeBackupJob, assertSafeCtRestore, assertSafeCriticalCtTune, backupJobChanges, criticalCtPlan, desiredBackupJobs } from './host-maintenance';
 
 const ctx = { pool: 'forge', criticalCtids: [100, 150] };
 
@@ -41,5 +41,19 @@ describe('garde des CT critiques', () => {
 		expect(criticalCtPlan({ memoryMb: 512, usedMb: 500, cpuunits: 400, hostAvailableMb: 8000 })).toEqual({ memory: 1024 });
 		expect(criticalCtPlan({ memoryMb: 512, usedMb: 200, cpuunits: 400, hostAvailableMb: 8000 })).toEqual({});
 		expect(criticalCtPlan({ memoryMb: 512, usedMb: 500, cpuunits: 400, hostAvailableMb: 2200 })).toEqual({});
+	});
+});
+
+describe('assertSafeCtRestore', () => {
+	const base = { vmid: 510, volid: 'forge-backup:backup/vzdump-lxc-510-2026_11_16-04_00_01.tar.zst', criticalCtids: [100, 150], ownedByForge: true };
+	it('accepte la sauvegarde du même CT Forge', () => {
+		expect(() => assertSafeCtRestore(base)).not.toThrow();
+	});
+	it('refuse un CT critique, un CT hors Forge, la sauvegarde d’un autre CT ou un volid bizarre', () => {
+		expect(() => assertSafeCtRestore({ ...base, vmid: 100, volid: 'forge-backup:backup/vzdump-lxc-100-2026_11_16-04_00_01.tar.zst' })).toThrow();
+		expect(() => assertSafeCtRestore({ ...base, ownedByForge: false })).toThrow();
+		expect(() => assertSafeCtRestore({ ...base, volid: 'forge-backup:backup/vzdump-lxc-511-2026_11_16-04_00_01.tar.zst' })).toThrow();
+		expect(() => assertSafeCtRestore({ ...base, volid: 'forge-backup:backup/../vzdump-lxc-510-x.tar.zst' })).toThrow();
+		expect(() => assertSafeCtRestore({ ...base, volid: 'local:iso/vzdump-lxc-510-2026_11_16.tar.zst' })).toThrow();
 	});
 });

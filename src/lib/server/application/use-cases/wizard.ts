@@ -2,7 +2,7 @@
 import { candidateIps, nextFreeCtid } from '$lib/domain/allocation';
 import { detectDeployMode, normalizeWorkdir, repoPath, type DetectionResult } from '$lib/domain/compose-detect';
 import { analyzeCompose, type ComposeAnalysis } from '$lib/domain/compose-analysis';
-import { ENV_TEMPLATE_FILES, parseEnvTemplate, type EnvTemplate } from '$lib/domain/env-template';
+import { envTemplateCandidates, parseEnvTemplate, type EnvTemplate } from '$lib/domain/env-template';
 import { buildFqdn, isValidSubdomain, normalizeSubdomain, servesDomain } from '$lib/domain/domain-name';
 import { errorMessage, UserFacingError } from '$lib/domain/errors';
 import { assessHostRam, committedMemoryMb, hostMemoryInUse, SIZES, type SizeKey } from '$lib/domain/sizes';
@@ -25,6 +25,8 @@ export interface RepoInspection {
 	composeServices: string[];
 	compose: ComposeAnalysis | null;
 	envTemplate: EnvTemplate | null;
+	/** Modèle propre au dev (.env.development…) s'il existe, sinon le même que envTemplate. */
+	envTemplateDev: EnvTemplate | null;
 }
 
 /** Contenu direct d'un dossier du dépôt ('' ou '.' : la racine). */
@@ -97,7 +99,7 @@ export class WizardService {
 			return analyzeCompose((await api.getFile(owner, name, repoPath(workdir, detection.file), branch))?.content ?? '');
 		};
 		// Lectures indépendantes : en parallèle.
-		const [subdirs, wfFiles, compose, envTemplate] = await Promise.all([
+		const [subdirs, wfFiles, compose, envTemplate, envTemplateDev] = await Promise.all([
 			Promise.all(
 				dirs.map(async (d) => {
 					const entries = await list(d.path).catch(() => []);
@@ -112,7 +114,8 @@ export class WizardService {
 				)
 			),
 			readCompose(),
-			findEnvTemplate(api, owner, name, workdir, branch, list)
+			findEnvTemplate(api, owner, name, workdir, branch, list),
+			findEnvTemplate(api, owner, name, workdir, branch, list, 'development')
 		]);
 
 		const linked = this.s.repos.projects
@@ -129,7 +132,8 @@ export class WizardService {
 			linked,
 			composeServices: compose?.services.map((x) => x.name) ?? [],
 			compose,
-			envTemplate
+			envTemplate,
+			envTemplateDev
 		};
 	}
 
@@ -205,19 +209,20 @@ export class WizardService {
 	}
 }
 
-/** Premier modèle de .env trouvé dans le dossier de travail (puis à la racine). */
+/** Premier modèle de .env trouvé dans le dossier de travail (puis à la racine) ; en dev, .env.development & co d'abord. */
 export async function findEnvTemplate(
 	api: ForgeServices['github']['api'],
 	owner: string,
 	repo: string,
 	workdir: string,
 	branch: string,
-	list: DirLister = (dir) => api.listDir(owner, repo, dir === '.' ? '' : dir, branch)
+	list: DirLister = (dir) => api.listDir(owner, repo, dir === '.' ? '' : dir, branch),
+	environment: 'production' | 'development' = 'production'
 ): Promise<EnvTemplate | null> {
 	const dirs = workdir === '.' ? ['.'] : [workdir, '.'];
 	for (const dir of dirs) {
 		const listing = (await list(dir).catch(() => [])).map((e) => e.name);
-		const file = ENV_TEMPLATE_FILES.find((f) => listing.includes(f));
+		const file = envTemplateCandidates(environment).find((f) => listing.includes(f));
 		if (!file) continue;
 		const path = repoPath(dir, file);
 		const content = (await api.getFile(owner, repo, path, branch))?.content;

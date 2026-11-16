@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import WebConsole from '$lib/components/organisms/web-console.svelte';
 	import { enhance } from '$app/forms';
 	import { invalidate } from '$app/navigation';
 	import Play from '@lucide/svelte/icons/play';
@@ -12,6 +14,10 @@
 	import Container from '@lucide/svelte/icons/container';
 	import Layers from '@lucide/svelte/icons/layers';
 	import Archive from '@lucide/svelte/icons/archive';
+	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
+	import { toast } from 'svelte-sonner';
+	import { goto } from '$app/navigation';
+	import { levelAtLeast } from '$lib/domain/access';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
 	import SectionCard from '$lib/components/molecules/section-card.svelte';
@@ -48,6 +54,11 @@
 	let moving = $state(false);
 	let waking = $state(false);
 	let powerAction = $state('');
+	let backingUp = $state(false);
+	let restoreTarget = $state<{ volid: string; ctime: number } | null>(null);
+	let restoreForm = $state<HTMLFormElement | null>(null);
+	const isAdmin = $derived(data.level === 'admin');
+	const canEdit = $derived(data.level === 'admin' || levelAtLeast(data.level, 'edit'));
 
 	function ask(action: string, title: string, description: string) {
 		confirm = { action, title, description };
@@ -299,20 +310,55 @@
 			</ul>
 		</SectionCard>
 
-		<SectionCard title="Sauvegardes" description="Sauvegardes vzdump de ce CT sur le stockage local (une est faite automatiquement avant toute suppression)." icon={Archive} bodyClass="p-0">
+		<section id="sauvegardes" class="scroll-mt-20 rounded-lg border bg-card">
+			<div class="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+				<Archive class="size-4 text-muted-foreground" />
+				<div class="min-w-0 flex-1">
+					<h2 class="text-[13px] font-semibold">Sauvegardes du conteneur</h2>
+					<p class="text-xs text-muted-foreground">Tout le CT (code, images, données). Chaque nuit à {data.backupPlan.schedule} · {data.backupPlan.max} au plus : 7 jours, 4 semaines, 5 mois.</p>
+				</div>
+				{#if canEdit}
+					<form method="POST" action="?/backup" use:enhance={() => { backingUp = true; return async ({ result, update }) => { backingUp = false; if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? 'Sauvegarde impossible'); await update(); }; }}>
+						<Button type="submit" size="sm" disabled={backingUp || !!data.activeJob || !g}>{#if backingUp}<Spinner />{:else}<Archive />{/if} Sauvegarder maintenant</Button>
+					</form>
+				{/if}
+			</div>
+			<div class="grid grid-cols-3 divide-x border-b text-center">
+				<div class="px-3 py-3">
+					<p class="label-caps text-muted-foreground">Dernière</p>
+					<p class="mt-1 text-sm font-medium">{#if c.backups[0]}<RelativeTime value={c.backups[0].ctime * 1000} />{:else}<span class="text-warning">aucune</span>{/if}</p>
+				</div>
+				<div class="px-3 py-3">
+					<p class="label-caps text-muted-foreground">Conservées</p>
+					<p class="mt-1 font-mono text-sm font-medium tabular-nums">{c.backups.length}<span class="text-muted-foreground"> / {data.backupPlan.max}</span></p>
+				</div>
+				<div class="px-3 py-3">
+					<p class="label-caps text-muted-foreground">Espace</p>
+					<p class="mt-1 font-mono text-sm font-medium tabular-nums">{bytes(c.backups.reduce((a, b) => a + b.size, 0))}</p>
+				</div>
+			</div>
 			{#if c.backups.length === 0}
-				<p class="px-5 py-6 text-sm text-muted-foreground">Aucune sauvegarde.</p>
+				<p class="px-4 py-6 text-sm text-muted-foreground">Aucune sauvegarde pour l'instant : la première sera faite cette nuit, ou maintenant avec le bouton.</p>
 			{:else}
 				<ul class="divide-y text-sm">
-					{#each c.backups as b (b.volid)}
-						<li class="flex items-center justify-between gap-3 px-5 py-2.5">
-							<span class="truncate font-mono text-xs">{b.volid}</span>
-							<span class="shrink-0 text-xs text-muted-foreground">{bytes(b.size)} · <RelativeTime value={b.ctime * 1000} /></span>
+					{#each c.backups as b, i (b.volid)}
+						<li class="group flex items-center gap-3 px-4 py-2.5">
+							<span class={cn('size-1.5 shrink-0 rounded-full', i === 0 ? 'bg-success' : 'bg-muted-foreground/40')}></span>
+							<span class="w-40 shrink-0 text-xs">{new Date(b.ctime * 1000).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+							<span class="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={b.volid}>{b.volid.split('/').pop()}</span>
+							<span class="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">{bytes(b.size)}</span>
+							{#if isAdmin}
+								<Button size="sm" variant="ghost" class="h-7 text-xs opacity-70 group-hover:opacity-100" disabled={!!data.activeJob} onclick={() => (restoreTarget = b)}><RotateCcw /> Restaurer</Button>
+							{/if}
 						</li>
 					{/each}
 				</ul>
 			{/if}
-		</SectionCard>
+		</section>
+
+		{#if isAdmin && running && g}
+			<WebConsole slug={data.project.slug} ctid={g.vmid} dryRun={page.data.dryRun === true} />
+		{/if}
 	</div>
 {/if}
 
@@ -323,4 +369,29 @@
 	confirmLabel="Confirmer"
 	destructive={confirm?.action === 'stop'}
 	onConfirm={() => confirm && submitPower(confirm.action)}
+/>
+
+<form
+	method="POST"
+	action="?/restore"
+	bind:this={restoreForm}
+	class="hidden"
+	use:enhance={() => async ({ result }) => {
+		if (result.type === 'redirect') void goto(result.location);
+		else if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? 'Restauration impossible');
+	}}
+>
+	<input type="hidden" name="volid" value={restoreTarget?.volid ?? ''} />
+</form>
+<ConfirmDialog
+	bind:open={() => !!restoreTarget, (v) => { if (!v) restoreTarget = null; }}
+	title="Restaurer la sauvegarde du {restoreTarget ? new Date(restoreTarget.ctime * 1000).toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' }) : ''} ?"
+	description="Tout le conteneur revient à cet instant : code, images Docker ET données (base, fichiers envoyés). Ce qui a changé depuis est perdu. Forge fait d'abord une sauvegarde de l'état actuel, puis éteint le CT, le restaure et le rallume (le site est coupé quelques minutes)."
+	confirmLabel="Restaurer"
+	destructive
+	typeToConfirm={data.project.slug}
+	onConfirm={() => {
+		restoreForm?.requestSubmit();
+		restoreTarget = null;
+	}}
 />

@@ -25,7 +25,7 @@
 	this={href ? 'a' : 'article'}
 	{href}
 	class={cn(
-		'group relative flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-4 transition-all',
+		'group relative flex min-w-0 flex-col gap-4 rounded-lg border bg-card p-4 transition-all',
 		href && 'hover:-translate-y-0.5 hover:border-foreground/15 hover:shadow-lg hover:shadow-black/10',
 		card.kind === 'template' && 'opacity-70'
 	)}

@@ -24,6 +24,8 @@ import type {
 	ProxmoxApi,
 	PveCloneParams,
 	PvePermissions,
+	PveRrdPoint,
+	RrdTimeframe,
 	ResolverApi,
 	SshApi,
 	SshResult,
@@ -291,6 +293,35 @@ class FakeProxmox implements ProxmoxApi {
 		fw.rules = fw.rules.filter((r) => r.pos !== pos).map((r, i) => ({ ...r, pos: i }));
 	}
 
+	async rrd(vmid: number | null, timeframe: RrdTimeframe): Promise<PveRrdPoint[]> {
+		await delay(20, 80);
+		const step = timeframe === 'hour' ? 60 : timeframe === 'day' ? 60 * 30 : 60 * 60 * 3;
+		const now = Math.floor(Date.now() / 1000 / step) * step;
+		const g = vmid === null ? null : world().guests.get(vmid);
+		if (vmid !== null && !g) throw new ExternalApiError('Proxmox', `CT ${vmid} does not exist`, 500);
+		const seed = vmid ?? 7;
+		const maxmem = g ? g.memMb * MiB : HOST.memTotal;
+		const maxcpu = g ? g.cores : HOST.cpus;
+		const baseCpu = g ? g.baseCpu : 0.1;
+		const baseMem = g ? g.baseMemRatio : HOST.baseUsed / HOST.memTotal;
+		return Array.from({ length: 70 }, (_, i) => {
+			const time = now - (69 - i) * step;
+			const day = Math.sin(((time / 3600) % 24) / 24 * Math.PI * 2 - 2) * 0.5 + 0.5;
+			const noise = Math.sin(time / 977 + seed) * 0.5 + Math.sin(time / 311 + seed * 3) * 0.3;
+			const spike = Math.abs(Math.sin(time / 5400 + seed)) > 0.985 ? 3 : 1;
+			const off = g && g.status !== 'running' && i > 60;
+			return {
+				time,
+				cpu: off ? 0 : Math.max(0.002, baseCpu * (0.5 + day + noise * 0.4) * spike),
+				maxcpu,
+				mem: off ? 0 : maxmem * Math.min(0.95, baseMem * (0.9 + day * 0.15 + noise * 0.05)),
+				maxmem,
+				netin: off ? 0 : Math.max(0, (g ? 12_000 : 90_000) * (0.3 + day * 1.4 + noise * 0.5) * spike),
+				netout: off ? 0 : Math.max(0, (g ? 40_000 : 180_000) * (0.3 + day * 1.6 + noise * 0.6) * spike)
+			};
+		});
+	}
+
 	async listBackups(_storage: string, vmid: number) {
 		await delay();
 		return world()
@@ -402,7 +433,15 @@ class FakeProxmox implements ProxmoxApi {
 		});
 	}
 
-	async vzdump(vmid: number, storage: string) {
+	async restoreCt(vmid: number, volid: string, _storage: string) {
+		await delay();
+		const g = this.#requireWrite(vmid, 'VM.Allocate');
+		if (g.status === 'running') throw new ExternalApiError('Proxmox', `CT ${vmid} is running - unable to restore`, 500);
+		if (!world().backups.some((b) => b.volid === volid)) throw new ExternalApiError('Proxmox', `volume '${volid}' does not exist`, 500);
+		return this.#task([`INFO: restoring '${volid}' now..`, 'INFO: extracting archive', 'INFO: Total bytes read: 1309368320 (1.3GiB, 210MiB/s)', 'TASK OK'], 4000);
+	}
+
+	async vzdump(vmid: number, storage: string, _opts?: { notes?: string; pruneBackups?: string }) {
 		await delay();
 		const g = this.#requireWrite(vmid, 'VM.Backup');
 		const stamp = new Date().toISOString().replace(/[-:]/g, '_').replace('T', '-').slice(0, 19);
@@ -676,6 +715,21 @@ class FakeGithub implements GithubApi {
 		}
 		const r = repoOf(owner, name);
 		return { sha: createHash('sha1').update(`${r.name}-${r.commits}`).digest('hex'), message: `dernier commit de ${branch}`, date: new Date(r.pushedAt).toISOString() };
+	}
+
+	async compareCommits(owner: string, name: string, base: string, head: string) {
+		await delay();
+		if (base === head) return { aheadBy: 0, commits: [] };
+		const msgs = ['feat: page contact', 'fix: lien cassé dans le menu', 'chore: mise à jour des dépendances', 'feat(api): pagination des résultats', 'fix: fuseau horaire des dates', 'style: espacements de la page d’accueil'];
+		const n = (parseInt(base.slice(0, 2), 16) || 3) % 5;
+		const now = Date.now();
+		const commits = Array.from({ length: n }, (_, i) => ({
+			sha: createHash('sha1').update(`${owner}/${name}-${base}-${i}`).digest('hex'),
+			message: msgs[(i + n) % msgs.length]!,
+			date: new Date(now - (n - i) * 3_600_000 * 5).toISOString(),
+			author: 'BastienGRNT'
+		}));
+		return { aheadBy: n, commits };
 	}
 
 	async downloadTarball() {
@@ -1309,6 +1363,18 @@ class FakeOffsite implements OffsiteApi {
 		const s = this.#snaps.find((x) => x.id === id && x.path === path);
 		if (!s) throw new Error('restic dump : introuvable');
 		return s.data;
+	}
+	dumpStream(id: string, path: string) {
+		const s = this.#snaps.find((x) => x.id === id && x.path === path);
+		return new ReadableStream<Uint8Array>({
+			start(c) {
+				if (!s) c.error(new Error('restic dump : introuvable'));
+				else {
+					c.enqueue(new Uint8Array(s.data));
+					c.close();
+				}
+			}
+		});
 	}
 	async forget() {}
 }

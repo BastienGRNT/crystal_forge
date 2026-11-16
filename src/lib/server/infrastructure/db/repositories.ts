@@ -13,7 +13,13 @@ import {
 	resources,
 	sessions,
 	settings,
+	spaceMembers,
+	spaces,
+	notifications,
+	uptimeChecks,
 	users,
+	type NotificationRow,
+	type SpaceRow,
 	type AccountRow,
 	type DomainRow,
 	type JobLogRow,
@@ -323,8 +329,41 @@ export class AuthRepo {
 	}
 
 	// --- Droits par projet ---
+	/** Droits effectifs : accès directs aux projets + accès aux espaces (étendus à leurs projets), le plus haut gagne. */
 	membershipsOf(userId: number): { projectId: number; level: AccessLevel }[] {
-		return this.db.select({ projectId: projectMembers.projectId, level: projectMembers.level }).from(projectMembers).where(eq(projectMembers.userId, userId)).all();
+		const direct = this.db.select({ projectId: projectMembers.projectId, level: projectMembers.level }).from(projectMembers).where(eq(projectMembers.userId, userId)).all();
+		const viaSpace = this.db
+			.select({ projectId: projects.id, level: spaceMembers.level })
+			.from(spaceMembers)
+			.innerJoin(projects, eq(projects.spaceId, spaceMembers.spaceId))
+			.where(eq(spaceMembers.userId, userId))
+			.all();
+		const rank: Record<AccessLevel, number> = { read: 0, deploy: 1, edit: 2 };
+		const best = new Map<number, AccessLevel>();
+		for (const m of [...direct, ...viaSpace]) {
+			const cur = best.get(m.projectId);
+			if (!cur || rank[m.level] > rank[cur]) best.set(m.projectId, m.level);
+		}
+		return [...best].map(([projectId, level]) => ({ projectId, level }));
+	}
+	spaceMembershipsOf(userId: number): { spaceId: number; level: AccessLevel }[] {
+		return this.db.select({ spaceId: spaceMembers.spaceId, level: spaceMembers.level }).from(spaceMembers).where(eq(spaceMembers.userId, userId)).all();
+	}
+	allSpaceMemberships(): { userId: number; spaceId: number; level: AccessLevel }[] {
+		return this.db.select({ userId: spaceMembers.userId, spaceId: spaceMembers.spaceId, level: spaceMembers.level }).from(spaceMembers).all();
+	}
+	setSpaceMember(userId: number, spaceId: number, level: AccessLevel): void {
+		this.db
+			.insert(spaceMembers)
+			.values({ userId, spaceId, level })
+			.onConflictDoUpdate({ target: [spaceMembers.userId, spaceMembers.spaceId], set: { level } })
+			.run();
+	}
+	removeSpaceMember(userId: number, spaceId: number): void {
+		this.db.delete(spaceMembers).where(and(eq(spaceMembers.userId, userId), eq(spaceMembers.spaceId, spaceId))).run();
+	}
+	setNotificationsSeen(userId: number, at: number): void {
+		this.db.update(users).set({ notificationsSeenAt: at }).where(eq(users.id, userId)).run();
 	}
 	allMemberships(): { userId: number; projectId: number; level: AccessLevel }[] {
 		return this.db.select({ userId: projectMembers.userId, projectId: projectMembers.projectId, level: projectMembers.level }).from(projectMembers).all();
@@ -403,5 +442,72 @@ export class AccountRepo {
 	}
 	delete(id: number): void {
 		this.db.delete(accounts).where(eq(accounts.id, id)).run();
+	}
+}
+
+export class SpaceRepo {
+	constructor(private readonly db: Db) {}
+
+	list(): SpaceRow[] {
+		return this.db.select().from(spaces).orderBy(asc(spaces.position), asc(spaces.id)).all();
+	}
+	get(id: number): SpaceRow | undefined {
+		return this.db.select().from(spaces).where(eq(spaces.id, id)).get();
+	}
+	create(data: { name: string; color: string; icon: string }): SpaceRow {
+		const position = (this.db.select({ n: count() }).from(spaces).get()?.n ?? 0) + 1;
+		return this.db.insert(spaces).values({ ...data, position }).returning().get();
+	}
+	update(id: number, data: Partial<{ name: string; color: string; icon: string; position: number }>): void {
+		this.db.update(spaces).set({ ...data, updatedAt: ts() }).where(eq(spaces.id, id)).run();
+	}
+	/** Supprime l'espace : ses projets restent, simplement sans espace. */
+	delete(id: number): void {
+		this.db.transaction((tx) => {
+			tx.update(projects).set({ spaceId: null }).where(eq(projects.spaceId, id)).run();
+			tx.delete(spaceMembers).where(eq(spaceMembers.spaceId, id)).run();
+			tx.delete(spaces).where(eq(spaces.id, id)).run();
+		});
+	}
+}
+
+export class UptimeRepo {
+	constructor(private readonly db: Db) {}
+
+	add(row: { domainId: number; ts: number; ok: boolean; status: number | null; ms: number | null; error: string | null }): void {
+		this.db.insert(uptimeChecks).values(row).run();
+	}
+	since(domainIds: number[], from: number) {
+		if (!domainIds.length) return [];
+		return this.db
+			.select({ domainId: uptimeChecks.domainId, ts: uptimeChecks.ts, ok: uptimeChecks.ok, status: uptimeChecks.status, ms: uptimeChecks.ms, error: uptimeChecks.error })
+			.from(uptimeChecks)
+			.where(and(inArray(uptimeChecks.domainId, domainIds), gt(uptimeChecks.ts, from)))
+			.orderBy(asc(uptimeChecks.ts))
+			.all();
+	}
+	/** Dernier relevé de chaque domaine. */
+	last(domainId: number) {
+		return this.db.select().from(uptimeChecks).where(eq(uptimeChecks.domainId, domainId)).orderBy(desc(uptimeChecks.ts)).limit(1).get();
+	}
+	prune(before: number): void {
+		this.db.delete(uptimeChecks).where(lt(uptimeChecks.ts, before)).run();
+	}
+}
+
+export class NotificationRepo {
+	constructor(private readonly db: Db) {}
+
+	add(n: Omit<NotificationRow, 'id' | 'ts'> & { ts?: number }): NotificationRow {
+		return this.db.insert(notifications).values({ ...n, ts: n.ts ?? ts() }).returning().get();
+	}
+	/** projectIds null : tout (admin). */
+	recent(projectIds: number[] | null, limit = 50): NotificationRow[] {
+		const q = this.db.select().from(notifications);
+		const filtered = projectIds === null ? q : q.where(projectIds.length ? inArray(notifications.projectId, projectIds) : eq(notifications.id, -1));
+		return filtered.orderBy(desc(notifications.ts), desc(notifications.id)).limit(limit).all();
+	}
+	prune(before: number): void {
+		this.db.delete(notifications).where(lt(notifications.ts, before)).run();
 	}
 }

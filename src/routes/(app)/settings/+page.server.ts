@@ -28,6 +28,8 @@ export const load: PageServerLoad = async () => {
 		accounts: f.accounts.list(),
 		offsite: f.offsite.state(),
 		offsiteConfigured: f.offsite.configured(),
+		// Liste des copies R2 (lecture, en différé : la page s'affiche sans attendre restic).
+		offsiteSnapshots: f.offsite.configured() ? f.offsite.all().catch(() => []) : Promise.resolve([]),
 		update: await f.selfUpdate.status().catch((err) => ({ error: errorMessage(err) }))
 	};
 };

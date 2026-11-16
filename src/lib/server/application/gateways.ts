@@ -28,7 +28,7 @@ import {
 	type OwnedResource,
 	type ResourceType
 } from '$lib/domain/safety-policy';
-import { assertSafeBackupJob, assertSafeCriticalCtTune, type DesiredBackupJob } from '$lib/domain/host-maintenance';
+import { assertSafeBackupJob, assertSafeCriticalCtTune, assertSafeCtRestore, BACKUP_RETENTION, FORGE_BACKUP_STORAGE, type DesiredBackupJob } from '$lib/domain/host-maintenance';
 import { OFFSITE_RETENTION, assertOffsitePath, assertSnapshotId, parseSnapshots, resticRepository, retentionArgs, type OffsiteSnapshot } from '$lib/domain/offsite';
 import { FORGE_ZFS_STORAGE, assertSafeVolumeMove } from '$lib/domain/storage';
 import { IDLE_READ_COMMAND, WAKE_PORT, assertCanToggleSleep } from '$lib/domain/sleep';
@@ -44,7 +44,8 @@ import type {
 	PowerAction,
 	PveFirewallRule,
 	PveGuest,
-	SshResult
+	SshResult,
+	RrdTimeframe
 } from './ports';
 import type { SettingsService } from './settings';
 import { sealForGithub } from '$server/infrastructure/crypto/sealed-box';
@@ -121,6 +122,10 @@ export class ProxmoxGateway {
 	}
 	permissions(path?: string) {
 		return this.api.permissions(path);
+	}
+	/** Historique CPU/RAM/réseau (nœud si vmid null) ; gardé 30 s. */
+	rrd(vmid: number | null, timeframe: RrdTimeframe) {
+		return this.#cache.get(`rrd:${vmid}:${timeframe}`, 30_000, () => this.api.rrd(vmid, timeframe));
 	}
 	listBackups(vmid: number, opts: { fresh?: boolean } = {}) {
 		const read = () => this.api.listBackups(this.d.settings.get('proxmox.backupStorage'), vmid);
@@ -312,15 +317,35 @@ export class ProxmoxGateway {
 		});
 	}
 
-	backup(vmid: number): Promise<string> {
+	/**
+	 * Sauvegarde vzdump. Sur le stockage de Forge, la rétention (16 au plus par CT) est appliquée
+	 * dans la foulée, comme pour les sauvegardes planifiées.
+	 */
+	backup(vmid: number, notes?: string): Promise<string> {
 		const storage = this.d.settings.get('proxmox.backupStorage');
+		const pruneBackups = storage === FORGE_BACKUP_STORAGE ? BACKUP_RETENTION : undefined;
 		return this.#run({
 			system: 'proxmox',
 			action: 'vzdump',
-			summary: `Sauvegarder le CT ${vmid} (vzdump snapshot, zstd) sur ${storage}`,
+			summary: `Sauvegarder le CT ${vmid} (vzdump snapshot, zstd) sur ${storage}${pruneBackups ? `, rétention ${pruneBackups}` : ''}`,
 			check: () => this.#assertModifiable(vmid),
-			execute: () => this.api.vzdump(vmid, storage),
+			execute: () => this.api.vzdump(vmid, storage, { notes, pruneBackups }),
 			simulate: () => `${DRY_PREFIX}:vzdump:${vmid}`
+		});
+	}
+
+	/** Restauration d'une archive de CE CT (arrêté) : remplace tout son disque. */
+	restore(vmid: number, volid: string, storage: string): Promise<string> {
+		return this.#run({
+			system: 'proxmox',
+			action: 'lxc.restore',
+			summary: `Restaurer le CT ${vmid} depuis ${volid} (disque sur ${storage})`,
+			check: async () => {
+				await this.#assertModifiable(vmid);
+				assertSafeCtRestore({ vmid, volid, criticalCtids: this.d.settings.criticalCtids(), ownedByForge: this.#owned().some((o) => o.externalId === String(vmid)) });
+			},
+			execute: () => this.api.restoreCt(vmid, volid, storage),
+			simulate: () => `${DRY_PREFIX}:restore:${vmid}`
 		});
 	}
 
@@ -1244,6 +1269,13 @@ export class OffsiteGateway {
 		assertSnapshotId(snapshotId);
 		assertOffsitePath(path);
 		return this.#api.dump(snapshotId, path, maxBytes);
+	}
+
+	/** Lecture en flux, déchiffrée par restic : autorisée en DRY_RUN. */
+	dumpStream(snapshotId: string, path: string): ReadableStream<Uint8Array> {
+		assertSnapshotId(snapshotId);
+		assertOffsitePath(path);
+		return this.#api.dumpStream(snapshotId, path);
 	}
 
 	prune(): Promise<void> {

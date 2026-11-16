@@ -105,12 +105,13 @@
 
 <svelte:head><title>Vue d'ensemble · Forge</title></svelte:head>
 
-<div class="space-y-8">
+<div class="animate-rise space-y-7">
 	<!-- En-tête : une phrase qui dit l'essentiel -->
 	<header class="flex flex-wrap items-end justify-between gap-4">
 		<div>
-			<h1 class="text-2xl font-semibold tracking-tight">{greeting} {page.data.user.username}</h1>
-			<p class="mt-1 text-sm text-muted-foreground">
+			<p class="label-caps mb-2 flex items-center gap-2 text-muted-foreground"><span class="size-1.5 rounded-full bg-ember glow text-ember"></span> Console · {data.node}</p>
+			<h1 class="text-[26px] leading-tight font-semibold tracking-[-0.025em]">{greeting} {page.data.user.username}</h1>
+			<p class="mt-1.5 text-sm text-muted-foreground">
 				{online} projet{online > 1 ? 's' : ''} en ligne sur {projectCards.length}
 				· {#if attention.length}<span class="font-medium text-warning">{attention.length} point{attention.length > 1 ? 's' : ''} à traiter</span>{:else}<span class="text-success">tout va bien</span>{/if}
 				· <span class="text-xs">mis à jour <RelativeTime value={data.fetchedAt} /></span>
@@ -126,12 +127,12 @@
 
 	<!-- À traiter -->
 	{#if attention.length}
-		<section class="overflow-hidden rounded-xl border border-warning/30 bg-card">
-			<h2 class="flex items-center gap-2 border-b bg-warning/5 px-4 py-2.5 text-sm font-semibold"><TriangleAlert class="size-4 text-warning" /> À traiter</h2>
+		<section class="overflow-hidden rounded-lg border border-warning/30 bg-card">
+			<h2 class="label-caps flex items-center gap-2 border-b border-warning/20 bg-warning/[0.06] px-4 py-2 text-warning"><TriangleAlert class="size-3.5" /> À traiter · {attention.length}</h2>
 			<ul class="divide-y">
 				{#each attention as a, i (i)}
 					{@const Icon = a.icon}
-					<li class="flex items-center gap-3 px-4 py-3">
+					<li class="flex items-center gap-3 px-4 py-2.5">
 						<Icon class={cn('size-4 shrink-0', TONE_TEXT[a.tone])} />
 						<div class="min-w-0 flex-1">
 							<p class="text-sm font-medium">{a.title}</p>
@@ -143,19 +144,19 @@
 			</ul>
 		</section>
 	{:else}
-		<div class="flex items-center gap-2.5 rounded-xl border border-success/25 bg-success/5 px-4 py-3 text-sm">
+		<div class="flex items-center gap-2.5 rounded-lg border border-success/20 bg-success/[0.05] px-4 py-2.5 text-sm">
 			<CircleCheck class="size-4 text-success" /> Rien à traiter : aucun échec, aucune alerte disque ni certificat.
 		</div>
 	{/if}
 
 	<!-- Serveur, en une ligne -->
 	{#if host && disk}
-		<a href="/server" class="group grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border transition-colors hover:border-foreground/20 md:grid-cols-4">
+		<a href="/server" class="group grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border shadow-sm transition-colors hover:border-foreground/20 md:grid-cols-4">
 			{@render stat('Processeur', percent(host.cpu), `${host.cpus} cœurs`, host.cpu)}
 			{@render stat('Mémoire', bytes(host.memory.used), `sur ${bytes(host.memory.total)}`, host.memory.used / host.memory.total)}
 			{@render stat('Stockage', bytes(disk.used), `sur ${bytes(disk.total)}`, disk.used / disk.total)}
 			<div class="flex flex-col justify-between bg-card px-4 py-3">
-				<span class="text-xs text-muted-foreground">Serveur {data.node}</span>
+				<span class="label-caps text-muted-foreground">Hôte {data.node}</span>
 				<span class="mt-1 flex items-center justify-between text-sm font-medium">en marche depuis {uptime(host.uptime)} <ArrowRight class="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" /></span>
 			</div>
 		</a>
@@ -164,7 +165,7 @@
 	<!-- Projets -->
 	<section class="space-y-3">
 		<div class="flex items-center justify-between">
-			<h2 class="text-sm font-semibold">Projets</h2>
+			<h2 class="label-caps text-muted-foreground">Projets</h2>
 			<a href="/projects" class="text-xs text-muted-foreground hover:text-foreground">Tous les projets →</a>
 		</div>
 		{#if projectCards.length}
@@ -174,7 +175,7 @@
 					{@const asleep = !!c.project && sleeping.has(c.project.slug)}
 					{@const d0 = c.domains[0]}
 					{@const url = d0 ? `https://${d0.fqdn}` : null}
-					<article class="group relative flex flex-col gap-3 rounded-xl border bg-card p-4 transition-all hover:border-foreground/20 hover:shadow-md">
+					<article class="group relative flex flex-col gap-3 overflow-hidden rounded-lg border bg-card p-4 transition-all before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-ember/70 before:to-transparent before:opacity-0 before:transition-opacity hover:border-foreground/20 hover:before:opacity-100">
 						<div class="flex items-start justify-between gap-2">
 							<div class="min-w-0">
 								<a href={c.project ? `/projects/${c.project.slug}` : '/server'} class="flex items-center gap-2 font-medium after:absolute after:inset-0">
@@ -215,7 +216,7 @@
 	<!-- Activité récente -->
 	<section class="space-y-3">
 		<div class="flex items-center justify-between">
-			<h2 class="text-sm font-semibold">Activité récente</h2>
+			<h2 class="label-caps text-muted-foreground">Activité récente</h2>
 			<a href="/jobs" class="text-xs text-muted-foreground hover:text-foreground">Tout l'historique →</a>
 		</div>
 		<JobList jobs={data.recentJobs} />
@@ -223,7 +224,7 @@
 
 	<!-- Autres conteneurs : repliés, ils ne servent qu'à l'occasion -->
 	{#if otherCards.length}
-		<section class="rounded-xl border bg-card">
+		<section class="rounded-lg border bg-card">
 			<button class="flex w-full items-center justify-between px-4 py-3 text-sm" onclick={() => (showOthers = !showOthers)} aria-expanded={showOthers}>
 				<span><span class="font-semibold">Autres conteneurs</span> <span class="text-muted-foreground">· {otherCards.length}, hors Forge (lecture seule)</span></span>
 				<ChevronDown class={cn('size-4 text-muted-foreground transition-transform', showOthers && 'rotate-180')} />
@@ -249,10 +250,10 @@
 {#snippet stat(label: string, value: string, sub: string, ratio: number)}
 	<div class="bg-card px-4 py-3">
 		<div class="flex items-baseline justify-between gap-2">
-			<span class="text-xs text-muted-foreground">{label}</span>
-			<span class={cn('text-xs', TONE_TEXT[usageTone(ratio)])}>{percent(ratio)}</span>
+			<span class="label-caps text-muted-foreground">{label}</span>
+			<span class={cn('font-mono text-xs', TONE_TEXT[usageTone(ratio)])}>{percent(ratio)}</span>
 		</div>
-		<p class="mt-1 text-sm font-medium">{value} <span class="text-xs font-normal text-muted-foreground">{sub}</span></p>
+		<p class="mt-1.5 font-mono text-lg font-medium tracking-tight tabular-nums">{value} <span class="font-sans text-xs font-normal tracking-normal text-muted-foreground">{sub}</span></p>
 		<Meter size="sm" value={ratio} class="mt-2" />
 	</div>
 {/snippet}

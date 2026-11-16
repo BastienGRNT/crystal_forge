@@ -22,6 +22,7 @@
 	import * as Alert from '$lib/components/atoms/ui/alert';
 	import type { HealthCheck, HealthStatus } from '$server/application/use-cases/server-health';
 	import { cn } from '$lib/utils';
+	import MetricsPanel from '$lib/components/organisms/metrics-panel.svelte';
 
 	let { data, form } = $props();
 	let refreshing = $state(false);
@@ -73,6 +74,8 @@
 {:else if form && 'queued' in form}
 	<Alert.Root class="mb-6 border-success/40"><ShieldCheck class="text-success" /><Alert.Description>{form.queued?.length ? `${form.queued.length} job(s) « Pare-feu du CT » en file : suivez-les dans Jobs.` : 'Tous les pare-feu sont déjà à jour.'}</Alert.Description></Alert.Root>
 {/if}
+
+<MetricsPanel endpoint="/api/host/metrics" title="Historique du serveur" class="mb-6" />
 
 <SectionCard title="CT de build" icon={Hammer} class="mb-6">
 	{#await data.builder}

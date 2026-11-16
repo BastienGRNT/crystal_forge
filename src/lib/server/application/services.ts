@@ -1,5 +1,5 @@
 import type { AppConfig } from '$server/infrastructure/config';
-import type { DomainRepo, JobRepo, ProjectRepo, ResourceRepo } from '$server/infrastructure/db/repositories';
+import type { DomainRepo, JobRepo, NotificationRepo, ProjectRepo, ResourceRepo, SpaceRepo, UptimeRepo } from '$server/infrastructure/db/repositories';
 import type { EventBus } from './events';
 import type { DnsGateway, GithubGateway, ProxmoxGateway, ProxyGateway, ShellGateway } from './gateways';
 import type { WriteGuard } from './guard';
@@ -31,6 +31,9 @@ export interface ForgeServices {
 		domains: DomainRepo;
 		jobs: JobRepo;
 		resources: ResourceRepo;
+		spaces: SpaceRepo;
+		uptime: UptimeRepo;
+		notifications: NotificationRepo;
 	};
 }
 

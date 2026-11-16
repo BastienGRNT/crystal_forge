@@ -4,6 +4,7 @@ import { errorMessage } from '$lib/domain/errors';
 import type { PowerAction } from '$server/application/ports';
 import { FORGE_ZFS_STORAGE, rootfsStorage } from '$lib/domain/storage';
 import { SLEEP_MINUTES_CHOICES } from '$lib/domain/sleep';
+import { BACKUP_MAX_PER_CT, BACKUP_RETENTION } from '$lib/domain/host-maintenance';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, depends }) => {
@@ -21,6 +22,7 @@ export const load: PageServerLoad = async ({ params, depends }) => {
 			onboot: view.config ? Number(view.config.onboot ?? 0) === 1 : null,
 			backups: view.backups
 		},
+		backupPlan: { schedule: '04:00', retention: BACKUP_RETENTION, max: BACKUP_MAX_PER_CT },
 		services: f.projects.containerServices(p, view.guest?.status === 'running'),
 		composePath: f.projects.composePath(p),
 		sleep: p.environment === 'development' ? { ...f.sleep.status(p), minutes: p.sleepAfterMin ?? 0, choices: [...SLEEP_MINUTES_CHOICES] } : null,
@@ -88,6 +90,27 @@ export const actions: Actions = {
 		let id: number;
 		try {
 			id = f.projects.applyFirewall(f.projects.get(params.slug));
+		} catch (err) {
+			return fail(400, { error: errorMessage(err) });
+		}
+		redirect(303, `/jobs/${id}`);
+	},
+	backup: async ({ params }) => {
+		const f = forge();
+		let id: number;
+		try {
+			id = f.projects.backupContainer(f.projects.get(params.slug));
+		} catch (err) {
+			return fail(400, { error: errorMessage(err) });
+		}
+		redirect(303, `/jobs/${id}`);
+	},
+	restore: async ({ params, request }) => {
+		const f = forge();
+		const volid = String((await request.formData()).get('volid') ?? '');
+		let id: number;
+		try {
+			id = await f.projects.restoreContainer(f.projects.get(params.slug), volid);
 		} catch (err) {
 			return fail(400, { error: errorMessage(err) });
 		}

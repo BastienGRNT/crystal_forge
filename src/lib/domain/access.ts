@@ -46,15 +46,15 @@ const CREATOR: Requirement = { kind: 'creator' };
 const CREATOR_PAGES = new Set(['/projects/new', '/api/github/repos', '/api/github/inspect', '/api/wizard/preview', '/api/wizard/domain']);
 
 /** Pages accessibles à tout utilisateur connecté (les listes sont filtrées côté serveur). */
-const OPEN_PAGES = new Set(['/projects', '/jobs', '/logout', '/account', '/api/events']);
+const OPEN_PAGES = new Set(['/projects', '/jobs', '/logout', '/account', '/api/events', '/api/notifications/seen']);
 
 /** Niveau exigé par un onglet de projet, pour les actions de formulaire (nom après « ?/ »). */
 const TAB_ACTIONS: Record<string, Record<string, AccessLevel | 'admin'>> = {
-	deployments: { redeploy: 'deploy', autoDeploy: 'deploy', migrate: 'admin' },
+	deployments: { redeploy: 'deploy', rollback: 'deploy', autoDeploy: 'deploy', migrate: 'admin' },
 	variables: { reveal: 'edit', save: 'edit' },
 	domains: { add: 'edit', repair: 'edit', remove: 'edit' },
 	database: { configure: 'edit', query: 'edit', backup: 'edit', import: 'edit', restore: 'edit' },
-	container: { power: 'edit', resize: 'admin', firewall: 'admin', sleep: 'edit', wake: 'deploy', clean: 'edit' },
+	container: { power: 'edit', resize: 'admin', firewall: 'admin', sleep: 'edit', wake: 'deploy', clean: 'edit', backup: 'edit', restore: 'admin' },
 	settings: { update: 'admin', upgrade: 'admin', delete: 'admin', protection: 'admin', accessUsers: 'admin' }
 };
 
@@ -104,7 +104,8 @@ export function requirementFor(method: string, pathname: string, search = ''): R
 		return projectRequirement(slug, need ?? 'admin');
 	}
 
-	const projectApi = /^\/api\/projects\/([^/]+)\/(logs|runs|db)(?:\/.*)?$/.exec(path);
+	// Lectures d'un projet (logs, graphiques, surveillance). La console n'y figure pas : réservée à l'admin.
+	const projectApi = /^\/api\/projects\/([^/]+)\/(logs|runs|db|metrics|uptime|commits)(?:\/.*)?$/.exec(path);
 	if (projectApi) {
 		const slug = decodeURIComponent(projectApi[1] as string);
 		return projectRequirement(slug, projectApi[2] === 'db' ? 'edit' : 'read');

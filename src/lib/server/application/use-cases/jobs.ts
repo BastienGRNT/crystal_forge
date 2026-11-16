@@ -72,6 +72,22 @@ export class JobQueries {
 		};
 	}
 
+	/** Versions réellement mises en ligne (jobs réussis hors simulation), la plus récente d'abord. */
+	deployedVersions(projectId: number, limit = 8): { jobId: number; sha: string; at: number; rollback: boolean }[] {
+		const out: { jobId: number; sha: string; at: number; rollback: boolean }[] = [];
+		for (const j of this.s.repos.jobs.list({ projectId, limit: 60 })) {
+			if (j.status !== 'succeeded' || j.dryRun) continue;
+			const sha = this.s.repos.jobs
+				.steps(j.id)
+				.map((st) => parse(st.state).sha)
+				.find((v): v is string => typeof v === 'string' && /^[0-9a-f]{40}$/.test(v));
+			if (!sha || out.some((o) => o.sha === sha)) continue;
+			out.push({ jobId: j.id, sha, at: j.finishedAt ?? j.createdAt, rollback: parse(j.params).rollback === true });
+			if (out.length >= limit) break;
+		}
+		return out;
+	}
+
 	list(opts: { projectId?: number; projectIds?: number[]; limit?: number } = {}): JobSummary[] {
 		return this.s.repos.jobs.list(opts).map((j) => this.summary(j));
 	}

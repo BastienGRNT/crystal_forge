@@ -5,8 +5,8 @@
  */
 import { SafetyViolation } from './errors';
 
-/** Rétention : 7 jours, 4 semaines, 6 mois (par fichier sauvegardé). */
-export const OFFSITE_RETENTION = { daily: 7, weekly: 4, monthly: 6 } as const;
+/** Rétention : 7 jours, 4 semaines, 5 mois (16 au plus par fichier sauvegardé). */
+export const OFFSITE_RETENTION = { daily: 7, weekly: 4, monthly: 5 } as const;
 /** Une sauvegarde complète par jour ; la base de Forge toutes les heures. */
 export const OFFSITE_PROJECTS_EVERY_MS = 23 * 3600_000;
 export const OFFSITE_FORGE_EVERY_MS = 3600_000;

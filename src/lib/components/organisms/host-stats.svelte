@@ -21,7 +21,7 @@
 	const disk = $derived(host.storage ?? { total: host.rootfs.total, used: host.rootfs.used, avail: host.rootfs.total - host.rootfs.used });
 </script>
 
-<section class="grid gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-2 xl:grid-cols-4">
+<section class="grid gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-2 xl:grid-cols-4">
 	<div class="flex flex-col justify-between gap-3 bg-card p-5">
 		<div class="flex items-center gap-2 text-xs font-medium text-muted-foreground"><Server class="size-3.5" /> Hôte Proxmox</div>
 		<div>

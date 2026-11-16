@@ -22,6 +22,10 @@
 	import { statusInfo, usageTone, TONE_TEXT } from '$lib/status';
 	import { cn } from '$lib/utils';
 	import { deferred } from '$lib/deferred.svelte';
+	import MetricsPanel from '$lib/components/organisms/metrics-panel.svelte';
+	import UptimePanel from '$lib/components/organisms/uptime-panel.svelte';
+	import CommitsBehind from '$lib/components/organisms/commits-behind.svelte';
+	import { levelAtLeast } from '$lib/domain/access';
 
 	let { data } = $props();
 	const p = $derived(data.project);
@@ -46,24 +50,24 @@
 
 <svelte:head><title>{p.name} · Forge</title></svelte:head>
 
-<div class="space-y-6">
+<div class="animate-rise space-y-6">
 	<!-- Ce qui demande une action sur ce projet -->
 	{#if p.sleepingSince}
-		<div class="flex items-center gap-3 rounded-xl border border-info/30 bg-info/5 px-4 py-3 text-sm">
+		<div class="flex items-center gap-3 rounded-lg border border-info/30 bg-info/5 px-4 py-3 text-sm">
 			<Moon class="size-4 shrink-0 text-info" />
 			<p class="flex-1">En veille depuis <RelativeTime value={p.sleepingSince} /> : le site se réveille tout seul à la première visite (quelques secondes).</p>
 			<Button href="{base}/container" variant="outline" size="sm">Réglages de veille</Button>
 		</div>
 	{/if}
 	{#if p.ctid && data.build.buildMode !== 'builder' && data.level === 'admin'}
-		<div class="flex items-center gap-3 rounded-xl border border-warning/30 bg-warning/5 px-4 py-3 text-sm">
+		<div class="flex items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm">
 			<Hammer class="size-4 shrink-0 text-warning" />
 			<p class="flex-1">Ce projet construit encore ses images dans son propre conteneur (runner GitHub). Le passer sur le CT de build libère RAM et disque.</p>
 			<Button href="{base}/deployments" variant="outline" size="sm">Migrer <ArrowRight /></Button>
 		</div>
 	{/if}
 	{#if diskRatio >= 0.85}
-		<div class="flex items-center gap-3 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm">
+		<div class="flex items-center gap-3 rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 text-sm">
 			<HardDrive class="size-4 shrink-0 text-danger" />
 			<p class="flex-1">Disque plein à {percent(diskRatio)} : agrandissez-le ou faites le ménage avant le prochain déploiement.</p>
 			<Button href="{base}/container" variant="outline" size="sm">Ressources <ArrowRight /></Button>
@@ -72,10 +76,13 @@
 
 	<div class="grid gap-6 lg:grid-cols-3">
 		<div class="space-y-6 lg:col-span-2">
+			{#if data.build.buildMode === 'builder'}
+				<CommitsBehind slug={p.slug} owner={p.repoOwner} repo={p.repoName} branch={p.branch} canDeploy={data.level === 'admin' || levelAtLeast(data.level, 'deploy')} />
+			{/if}
 			<!-- Adresses -->
-			<section class="rounded-xl border bg-card">
-				<div class="flex items-center justify-between border-b px-4 py-3">
-					<h2 class="flex items-center gap-2 text-sm font-semibold"><Globe class="size-4 text-muted-foreground" /> Adresses</h2>
+			<section class="rounded-lg border bg-card">
+				<div class="flex items-center justify-between border-b px-4 py-2.5">
+					<h2 class="flex items-center gap-2 text-[13px] font-semibold"><Globe class="size-4 text-muted-foreground" /> Adresses</h2>
 					<a href="{base}/domains" class="text-xs text-muted-foreground hover:text-foreground">Gérer →</a>
 				</div>
 				{#if data.domains.length}
@@ -96,10 +103,12 @@
 				{/if}
 			</section>
 
+			{#if data.domains.length}<UptimePanel slug={p.slug} compact />{/if}
+
 			<!-- Services -->
-			<section class="rounded-xl border bg-card">
-				<div class="flex items-center justify-between border-b px-4 py-3">
-					<h2 class="flex items-center gap-2 text-sm font-semibold"><Layers class="size-4 text-muted-foreground" /> Services</h2>
+			<section class="rounded-lg border bg-card">
+				<div class="flex items-center justify-between border-b px-4 py-2.5">
+					<h2 class="flex items-center gap-2 text-[13px] font-semibold"><Layers class="size-4 text-muted-foreground" /> Services</h2>
 					<a href="{base}/logs" class="text-xs text-muted-foreground hover:text-foreground">Voir les logs →</a>
 				</div>
 				{#if !running}
@@ -129,7 +138,7 @@
 			<!-- Derniers jobs -->
 			<section class="space-y-3">
 				<div class="flex items-center justify-between">
-					<h2 class="text-sm font-semibold">Dernière activité</h2>
+					<h2 class="label-caps text-muted-foreground">Dernière activité</h2>
 					<a href="{base}/deployments" class="text-xs text-muted-foreground hover:text-foreground">Tout voir →</a>
 				</div>
 				<JobList jobs={data.jobs} showProject={false} />
@@ -138,9 +147,9 @@
 
 		<!-- Colonne droite : ressources et fiche technique -->
 		<aside class="space-y-6">
-			<section class="rounded-xl border bg-card">
-				<div class="flex items-center justify-between border-b px-4 py-3">
-					<h2 class="flex items-center gap-2 text-sm font-semibold"><Power class={cn('size-4', running ? 'text-success' : 'text-muted-foreground')} /> Conteneur</h2>
+			<section class="rounded-lg border bg-card">
+				<div class="flex items-center justify-between border-b px-4 py-2.5">
+					<h2 class="flex items-center gap-2 text-[13px] font-semibold"><Power class={cn('size-4', running ? 'text-success' : 'text-muted-foreground')} /> Conteneur</h2>
 					<a href="{base}/container" class="text-xs text-muted-foreground hover:text-foreground">Gérer →</a>
 				</div>
 				{#if g}
@@ -155,8 +164,8 @@
 				{/if}
 			</section>
 
-			<section class="rounded-xl border bg-card p-4">
-				<h2 class="mb-3 text-sm font-semibold">Fiche technique</h2>
+			<section class="rounded-lg border bg-card p-4">
+				<h2 class="label-caps mb-3 text-muted-foreground">Fiche technique</h2>
 				<dl class="space-y-2.5 text-sm">
 					<div class="flex items-baseline justify-between gap-3">
 						<dt class="text-xs text-muted-foreground">Commit en ligne</dt>
@@ -176,6 +185,8 @@
 			</section>
 		</aside>
 	</div>
+
+	{#if p.ctid}<MetricsPanel endpoint="/api/projects/{p.slug}/metrics" title="Historique du conteneur" />{/if}
 </div>
 
 {#snippet meter(label: string, value: string, sub: string, ratio: number)}

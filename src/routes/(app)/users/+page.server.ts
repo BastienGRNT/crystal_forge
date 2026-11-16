@@ -9,7 +9,8 @@ export const load: PageServerLoad = ({ depends }) => {
 	const f = forge();
 	return {
 		users: f.auth.listUsers(),
-		projects: f.repos.projects.list().map((p) => ({ id: p.id, slug: p.slug, name: p.name })),
+		projects: f.repos.projects.list().map((p) => ({ id: p.id, slug: p.slug, name: p.name, spaceId: p.spaceId })),
+		spaces: f.spaces.list(),
 		audit: f.audit.recent(60)
 	};
 };
@@ -43,6 +44,17 @@ export const actions: Actions = {
 		const level = String(d.get('level') ?? '');
 		try {
 			forge().auth.setMember(id(d, 'userId'), id(d, 'projectId'), isAccessLevel(level) ? level : null);
+		} catch (err) {
+			return fail(400, { error: errorMessage(err) });
+		}
+		return { saved: true };
+	},
+	/** Accès à tout un espace (projets présents et futurs). */
+	spaceMember: async ({ request }) => {
+		const d = await request.formData();
+		const level = String(d.get('level') ?? '');
+		try {
+			forge().auth.setSpaceMember(id(d, 'userId'), id(d, 'spaceId'), isAccessLevel(level) ? level : null);
 		} catch (err) {
 			return fail(400, { error: errorMessage(err) });
 		}

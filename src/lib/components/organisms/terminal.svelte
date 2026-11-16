@@ -57,15 +57,12 @@
 	const asText = $derived(shown.map((l) => `${time(l.ts)} ${LEVEL[l.level]?.tag ?? l.level} ${l.message}`).join('\n'));
 </script>
 
-<div class="overflow-hidden rounded-xl border bg-terminal text-terminal-foreground shadow-inner">
-	<div class="flex items-center gap-2 border-b border-white/5 px-3 py-2">
-		<div class="flex gap-1.5">
-			<span class="size-2.5 rounded-full bg-white/10"></span><span class="size-2.5 rounded-full bg-white/10"></span><span class="size-2.5 rounded-full bg-white/10"></span>
-		</div>
-		<TerminalIcon class="ml-2 size-3.5 text-white/40" />
+<div class="overflow-hidden rounded-lg border bg-terminal text-terminal-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.03)]">
+	<div class="flex items-center gap-2 border-b border-white/[0.06] bg-white/[0.02] px-3 py-2">
+		<TerminalIcon class="size-3.5 text-ember" />
 		<span class="truncate font-mono text-xs text-white/60">{title}</span>
 		{#if live}
-			<span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+			<span class="inline-flex items-center gap-1.5 rounded-sm bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] font-medium tracking-wider text-emerald-400 uppercase">
 				<span class="size-1.5 animate-pulse rounded-full bg-emerald-400"></span> en direct
 			</span>
 		{/if}

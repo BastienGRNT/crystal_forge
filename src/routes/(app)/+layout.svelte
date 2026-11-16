@@ -34,6 +34,6 @@
 
 <CommandPalette projects={data.projects} user={data.user} />
 
-<AppShell mode={data.mode} dryRun={data.dryRun} projects={data.projects} activeJobs={data.activeJobs} activeJobList={data.activeJobList} host={host.value ?? null} user={data.user}>
+<AppShell mode={data.mode} dryRun={data.dryRun} projects={data.projects} spaces={data.spaces} notifications={data.notifications} activeJobs={data.activeJobs} activeJobList={data.activeJobList} host={host.value ?? null} user={data.user}>
 	{@render children()}
 </AppShell>

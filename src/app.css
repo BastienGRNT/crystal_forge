@@ -6,90 +6,98 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Thème clair */
-:root {
-	--background: oklch(0.99 0 0);
-	--foreground: oklch(0.16 0.005 270);
-	--card: oklch(1 0 0);
-	--card-foreground: oklch(0.16 0.005 270);
-	--popover: oklch(1 0 0);
-	--popover-foreground: oklch(0.16 0.005 270);
-	--primary: oklch(0.2 0.005 270);
-	--primary-foreground: oklch(0.985 0 0);
-	--secondary: oklch(0.96 0.002 270);
-	--secondary-foreground: oklch(0.2 0.005 270);
-	--muted: oklch(0.96 0.002 270);
-	--muted-foreground: oklch(0.5 0.01 270);
-	--accent: oklch(0.955 0.003 270);
-	--accent-foreground: oklch(0.2 0.005 270);
-	--destructive: oklch(0.58 0.22 27);
-	--border: oklch(0.91 0.003 270);
-	--input: oklch(0.9 0.003 270);
-	--ring: oklch(0.68 0.16 50);
-	--radius: 0.625rem;
+/*
+ * Thème « console » : fond quasi noir bleuté, surfaces étagées, bordures fines,
+ * un seul accent vif (ember, orange incandescent) réservé aux actions et à l'état actif.
+ */
 
-	/* Couleurs propres à Forge */
-	--ember: oklch(0.68 0.18 48);
-	--ember-foreground: oklch(0.99 0 0);
-	--success: oklch(0.6 0.15 155);
-	--warning: oklch(0.72 0.16 75);
-	--info: oklch(0.6 0.14 240);
-	--danger: oklch(0.58 0.22 27);
-	--terminal: oklch(0.17 0.005 270);
-	--terminal-foreground: oklch(0.9 0.005 270);
+/* Thème clair : papier froid, encre bleu-nuit, même accent. */
+:root {
+	--background: oklch(0.985 0.002 250);
+	--foreground: oklch(0.2 0.02 262);
+	--card: oklch(1 0 0);
+	--card-foreground: oklch(0.2 0.02 262);
+	--popover: oklch(1 0 0);
+	--popover-foreground: oklch(0.2 0.02 262);
+	--primary: oklch(0.2 0.02 262);
+	--primary-foreground: oklch(0.985 0.002 250);
+	--secondary: oklch(0.955 0.005 255);
+	--secondary-foreground: oklch(0.22 0.02 262);
+	--muted: oklch(0.955 0.005 255);
+	--muted-foreground: oklch(0.5 0.018 260);
+	--accent: oklch(0.945 0.007 255);
+	--accent-foreground: oklch(0.2 0.02 262);
+	--destructive: oklch(0.57 0.22 25);
+	--border: oklch(0.9 0.008 255);
+	--input: oklch(0.87 0.01 255);
+	--ring: oklch(0.66 0.2 42);
+	--radius: 0.4rem;
+
+	--ember: oklch(0.64 0.21 40);
+	--ember-foreground: oklch(0.99 0.01 60);
+	--success: oklch(0.6 0.16 152);
+	--warning: oklch(0.7 0.16 70);
+	--info: oklch(0.58 0.17 250);
+	--danger: oklch(0.57 0.22 25);
+	--terminal: oklch(0.17 0.015 262);
+	--terminal-foreground: oklch(0.9 0.01 255);
+	--grid-line: oklch(0.2 0.02 262 / 6%);
+	--glow: 0;
 
 	--chart-1: var(--ember);
 	--chart-2: var(--info);
 	--chart-3: var(--success);
 	--chart-4: var(--warning);
 	--chart-5: var(--danger);
-	--sidebar: oklch(0.975 0.002 270);
-	--sidebar-foreground: oklch(0.2 0.005 270);
+	--sidebar: oklch(0.97 0.004 255);
+	--sidebar-foreground: oklch(0.25 0.02 262);
 	--sidebar-primary: var(--ember);
 	--sidebar-primary-foreground: oklch(0.99 0 0);
-	--sidebar-accent: oklch(0.94 0.003 270);
-	--sidebar-accent-foreground: oklch(0.16 0.005 270);
-	--sidebar-border: oklch(0.91 0.003 270);
+	--sidebar-accent: oklch(0.925 0.008 255);
+	--sidebar-accent-foreground: oklch(0.18 0.02 262);
+	--sidebar-border: oklch(0.9 0.008 255);
 	--sidebar-ring: var(--ember);
 }
 
-/* Thème sombre (par défaut) */
+/* Thème sombre (par défaut) : bleu-nuit presque noir. */
 .dark {
-	--background: oklch(0.13 0.004 270);
-	--foreground: oklch(0.96 0.003 270);
-	--card: oklch(0.165 0.004 270);
-	--card-foreground: oklch(0.96 0.003 270);
-	--popover: oklch(0.18 0.004 270);
-	--popover-foreground: oklch(0.96 0.003 270);
-	--primary: oklch(0.96 0.003 270);
-	--primary-foreground: oklch(0.16 0.005 270);
-	--secondary: oklch(0.22 0.005 270);
-	--secondary-foreground: oklch(0.96 0.003 270);
-	--muted: oklch(0.21 0.005 270);
-	--muted-foreground: oklch(0.66 0.01 270);
-	--accent: oklch(0.22 0.005 270);
-	--accent-foreground: oklch(0.96 0.003 270);
-	--destructive: oklch(0.66 0.2 25);
-	--border: oklch(1 0 0 / 9%);
-	--input: oklch(1 0 0 / 13%);
-	--ring: oklch(0.72 0.17 50);
+	--background: oklch(0.142 0.011 262);
+	--foreground: oklch(0.955 0.006 255);
+	--card: oklch(0.168 0.012 262);
+	--card-foreground: oklch(0.955 0.006 255);
+	--popover: oklch(0.192 0.013 262);
+	--popover-foreground: oklch(0.955 0.006 255);
+	--primary: oklch(0.955 0.006 255);
+	--primary-foreground: oklch(0.16 0.012 262);
+	--secondary: oklch(0.215 0.013 262);
+	--secondary-foreground: oklch(0.955 0.006 255);
+	--muted: oklch(0.205 0.013 262);
+	--muted-foreground: oklch(0.67 0.017 258);
+	--accent: oklch(0.225 0.014 262);
+	--accent-foreground: oklch(0.97 0.004 255);
+	--destructive: oklch(0.67 0.21 25);
+	--border: oklch(0.78 0.03 260 / 11%);
+	--input: oklch(0.78 0.03 260 / 16%);
+	--ring: oklch(0.74 0.19 46);
 
-	--ember: oklch(0.74 0.17 52);
-	--ember-foreground: oklch(0.15 0.01 50);
-	--success: oklch(0.72 0.16 155);
-	--warning: oklch(0.8 0.15 80);
-	--info: oklch(0.72 0.13 240);
-	--danger: oklch(0.68 0.2 25);
-	--terminal: oklch(0.105 0.004 270);
-	--terminal-foreground: oklch(0.88 0.006 270);
+	--ember: oklch(0.73 0.19 46);
+	--ember-foreground: oklch(0.17 0.03 40);
+	--success: oklch(0.78 0.17 155);
+	--warning: oklch(0.83 0.15 82);
+	--info: oklch(0.74 0.14 238);
+	--danger: oklch(0.69 0.21 24);
+	--terminal: oklch(0.118 0.01 262);
+	--terminal-foreground: oklch(0.88 0.01 255);
+	--grid-line: oklch(0.8 0.03 260 / 5.5%);
+	--glow: 1;
 
-	--sidebar: oklch(0.115 0.004 270);
-	--sidebar-foreground: oklch(0.92 0.003 270);
+	--sidebar: oklch(0.125 0.011 262);
+	--sidebar-foreground: oklch(0.9 0.006 255);
 	--sidebar-primary: var(--ember);
-	--sidebar-primary-foreground: oklch(0.15 0.01 50);
-	--sidebar-accent: oklch(0.2 0.005 270);
-	--sidebar-accent-foreground: oklch(0.96 0.003 270);
-	--sidebar-border: oklch(1 0 0 / 7%);
+	--sidebar-primary-foreground: oklch(0.17 0.03 40);
+	--sidebar-accent: oklch(0.2 0.014 262);
+	--sidebar-accent-foreground: oklch(0.97 0.004 255);
+	--sidebar-border: oklch(0.78 0.03 260 / 9%);
 	--sidebar-ring: var(--ember);
 }
 
@@ -164,9 +172,12 @@
 	html {
 		@apply font-sans antialiased;
 		font-feature-settings: 'ss01', 'cv11';
+		scrollbar-width: thin;
+		scrollbar-color: color-mix(in oklch, var(--foreground) 16%, transparent) transparent;
 	}
 	body {
 		@apply bg-background text-foreground;
+		letter-spacing: -0.006em;
 	}
 	::selection {
 		background: color-mix(in oklch, var(--ember) 35%, transparent);
@@ -175,22 +186,83 @@
 	kbd,
 	pre {
 		@apply font-mono;
+		letter-spacing: 0;
+	}
+	::-webkit-scrollbar {
+		width: 10px;
+		height: 10px;
+	}
+	::-webkit-scrollbar-thumb {
+		border: 3px solid transparent;
+		border-radius: 999px;
+		background: color-mix(in oklch, var(--foreground) 16%, transparent) padding-box;
+	}
+	::-webkit-scrollbar-track {
+		background: transparent;
 	}
 }
 
 @layer utilities {
-	/* Fond quadrillé discret pour les pages d'accueil / auth */
+	/* Quadrillage discret (en-têtes, pages d'auth). */
 	.bg-grid {
 		background-image:
-			linear-gradient(to right, color-mix(in oklch, var(--foreground) 5%, transparent) 1px, transparent 1px),
-			linear-gradient(to bottom, color-mix(in oklch, var(--foreground) 5%, transparent) 1px, transparent 1px);
-		background-size: 32px 32px;
+			linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+			linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+		background-size: 24px 24px;
+		background-position: -1px -1px;
+	}
+	/* Quadrillage qui s'efface vers le bas : pour un bandeau d'en-tête. */
+	.bg-grid-fade {
+		background-image:
+			linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+			linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+		background-size: 24px 24px;
+		background-position: -1px -1px;
+		mask-image: linear-gradient(to bottom, black, transparent);
+	}
+	/* Lueur de l'accent en haut d'un bloc (halo très discret). */
+	.bg-ember-halo {
+		background-image: radial-gradient(60% 120% at 50% -20%, color-mix(in oklch, var(--ember) 14%, transparent), transparent 70%);
+	}
+	/* Lueur colorée autour d'une pastille d'état (couleur = currentColor). */
+	.glow {
+		box-shadow: 0 0 calc(8px * var(--glow)) 0 color-mix(in oklch, currentColor 70%, transparent);
+	}
+	/* Micro-libellé « console » : petites capitales espacées en mono. */
+	.label-caps {
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+		font-weight: 500;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
 	}
 	.scrollbar-thin {
 		scrollbar-width: thin;
-		scrollbar-color: color-mix(in oklch, var(--foreground) 18%, transparent) transparent;
+		scrollbar-color: color-mix(in oklch, var(--foreground) 16%, transparent) transparent;
+	}
+	.scrollbar-none {
+		scrollbar-width: none;
 	}
 	.text-balance {
 		text-wrap: balance;
+	}
+	/* Apparition légère des pages et blocs. */
+	.animate-rise {
+		animation: rise 0.32s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+	}
+	@keyframes rise {
+		from {
+			opacity: 0;
+			transform: translateY(4px);
+		}
+		to {
+			opacity: 1;
+			transform: none;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.animate-rise {
+			animation: none;
+		}
 	}
 }

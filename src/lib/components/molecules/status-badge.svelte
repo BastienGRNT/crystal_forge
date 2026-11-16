@@ -12,7 +12,7 @@
 	const s = $derived(info ?? statusInfo(status));
 </script>
 
-<span class={cn('inline-flex h-5.5 items-center gap-1.5 rounded-full px-2 text-xs font-medium whitespace-nowrap ring-1 ring-inset', TONE_SOFT[s.tone], className)}>
+<span class={cn('inline-flex h-5 items-center gap-1.5 rounded-sm px-1.5 text-[11px] font-medium whitespace-nowrap ring-1 ring-inset', TONE_SOFT[s.tone], className)}>
 	<StatusDot tone={s.tone} pulse={s.pulse} class="size-1.5" />
 	{s.label}
 </span>

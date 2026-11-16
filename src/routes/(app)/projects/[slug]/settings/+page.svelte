@@ -27,6 +27,9 @@
 	import DiffView from '$lib/components/molecules/diff-view.svelte';
 	import CodeBlock from '$lib/components/molecules/code-block.svelte';
 	import { cn } from '$lib/utils';
+	import FolderTree from '@lucide/svelte/icons/folder-tree';
+	import SpaceBadge from '$lib/components/atoms/space-badge.svelte';
+	import { toast } from 'svelte-sonner';
 
 	let { data, form } = $props();
 	const p = $derived(data.project);
@@ -39,12 +42,66 @@
 	});
 	let mode = $state<'full' | 'forget'>('full');
 	let typed = $state('');
+	let tagText = $state('');
+	$effect(() => {
+		tagText = data.organize.tags.join(', ');
+	});
+	let spaceChoice = $state<string>('');
+	$effect(() => {
+		spaceChoice = data.organize.spaceId ? String(data.organize.spaceId) : '';
+	});
+	const typedTags = $derived(tagText.split(/[,\s]+/).map((t) => t.trim().replace(/^#/, '').toLowerCase()).filter(Boolean));
+	const suggestions = $derived(data.organize.allTags.filter((t) => !typedTags.includes(t)).slice(0, 12));
 </script>
 
 <svelte:head><title>Paramètres · {p.name} · Forge</title></svelte:head>
 
 <div class="space-y-6">
 	{#if form?.error}<Alert.Root variant="destructive"><Alert.Description class="whitespace-pre-line">{form.error}</Alert.Description></Alert.Root>{/if}
+
+	<SectionCard title="Rangement" description="Espace et tags : pour retrouver et regrouper vos projets. Aucun effet sur le serveur." icon={FolderTree}>
+		<form
+			method="POST"
+			action="?/organize"
+			use:enhance={() =>
+				async ({ result, update }) => {
+					if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? 'Échec');
+					else toast.success('Rangement enregistré');
+					await update({ reset: false });
+				}}
+			class="space-y-4"
+		>
+			<fieldset class="space-y-1.5">
+				<legend class="text-xs font-medium text-muted-foreground">Espace</legend>
+				<div class="flex flex-wrap gap-1.5">
+					<label class="cursor-pointer">
+						<input type="radio" name="spaceId" value="" bind:group={spaceChoice} class="peer sr-only" />
+						<span class="inline-flex h-8 items-center rounded-md border px-3 text-xs text-muted-foreground transition peer-checked:border-ember/50 peer-checked:bg-ember/10 peer-checked:text-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ember/30">Aucun</span>
+					</label>
+					{#each data.organize.spaces as s (s.id)}
+						<label class="cursor-pointer">
+							<input type="radio" name="spaceId" value={String(s.id)} bind:group={spaceChoice} class="peer sr-only" />
+							<span class="inline-flex h-8 items-center rounded-md border px-2.5 text-xs transition peer-checked:border-ember/50 peer-checked:bg-ember/10 peer-focus-visible:ring-2 peer-focus-visible:ring-ember/30"><SpaceBadge space={s} size="xs" /></span>
+						</label>
+					{/each}
+					{#if data.organize.spaces.length === 0}<a href="/spaces" class="inline-flex h-8 items-center px-1 text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground">Créer un espace</a>{/if}
+				</div>
+			</fieldset>
+			<label class="block space-y-1.5">
+				<span class="text-xs font-medium text-muted-foreground">Tags <span class="font-normal">(séparés par des virgules, 8 maximum)</span></span>
+				<Input name="tags" bind:value={tagText} placeholder="vitrine, api, client-x" class="font-mono text-[13px]" />
+			</label>
+			{#if suggestions.length}
+				<div class="flex flex-wrap items-center gap-1">
+					<span class="mr-1 text-[11px] text-muted-foreground">Déjà utilisés :</span>
+					{#each suggestions as t (t)}
+						<button type="button" class="h-5 rounded-full border px-1.5 font-mono text-[10.5px] text-muted-foreground hover:border-foreground/25 hover:text-foreground" onclick={() => (tagText = [...typedTags, t].join(', '))}>+ #{t}</button>
+					{/each}
+				</div>
+			{/if}
+			<div class="flex justify-end"><Button type="submit" size="sm"><Save /> Enregistrer</Button></div>
+		</form>
+	</SectionCard>
 
 	<SectionCard title="Application" description="Ces réglages sont des variables de dépôt FORGE_* lues par le workflow." icon={Settings2}>
 		<form id="settings-form" method="POST" action="?/update" use:enhance class="grid gap-4 sm:grid-cols-3">
@@ -184,7 +241,7 @@
 		</ul>
 	</SectionCard>
 
-	<section class="overflow-hidden rounded-xl border border-danger/40">
+	<section class="overflow-hidden rounded-lg border border-danger/40">
 		<div class="flex flex-col gap-4 bg-danger/5 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
 			<div>
 				<h2 class="flex items-center gap-2 text-sm font-semibold text-danger"><TriangleAlert class="size-4" /> Zone dangereuse</h2>
