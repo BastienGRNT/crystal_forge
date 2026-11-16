@@ -83,6 +83,18 @@ export const SETTING_DEFS = {
 	'offsite.secretAccessKey': { default: '', secret: true },
 	/** État interne (JSON) : dernières réussites/échecs. Écrit par Forge. */
 	'offsite.state': { default: '{}' },
+	/**
+	 * CT de build (unique, créé par Forge dans la plage des projets) : construit les images de
+	 * tous les projets, puis Forge les installe dans leur CT. Allumé à la demande.
+	 */
+	'builder.ctid': { default: '' },
+	'builder.ip': { default: '' },
+	'builder.hostKey': { default: '' },
+	'builder.cores': { default: '4' },
+	'builder.memoryMb': { default: '4096' },
+	'builder.diskGb': { default: '40' },
+	/** Minutes sans build avant d'éteindre le CT de build. */
+	'builder.idleMin': { default: '15' },
 	/** Surcharge du DRY_RUN — uniquement en mode mock. */
 	'runtime.dryRun': { default: '' }
 } as const satisfies Record<string, Def>;

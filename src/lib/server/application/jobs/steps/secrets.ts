@@ -11,6 +11,10 @@ export const secretsStep: StepDefinition = {
 	async run(ctx) {
 		const { github } = ctx.services;
 		const p = ctx.project();
+		if (p.buildMode === 'builder') {
+			ctx.log('info', 'Déploiement par le CT de build : le .env et la configuration sont envoyés au CT à chaque déploiement (rien à écrire sur GitHub).');
+			return;
+		}
 		const repo = `${p.repoOwner}/${p.repoName}`;
 		// Serveur de dev : secret et variables dans l'environnement GitHub « development », qui prend le
 		// pas sur le dépôt sans toucher à ceux de la production.

@@ -46,6 +46,7 @@ export class UpgradeService {
 
 		return Promise.all([
 			safe('workflow', 'Workflow de déploiement', async () => {
+				if (p.buildMode === 'builder') return { status: 'ok', detail: 'Plus de workflow : Forge déploie lui-même chaque push (CT de build).' };
 				const WORKFLOW_PATH = workflowPathFor(p.environment);
 				const current = await github.api.getFile(p.repoOwner, p.repoName, WORKFLOW_PATH, p.branch);
 				const expected = generateWorkflow({ slug: p.slug, branch: p.branch, mode: p.deployMode, ctid: p.ctid, environment: p.environment });
@@ -66,6 +67,7 @@ export class UpgradeService {
 				return { status: 'outdated', detail: `Version ${v ?? '?'} → ${WORKFLOW_VERSION}. Commit « [skip ci] » après confirmation : pas de déploiement déclenché.`, diff };
 			}),
 			safe('variables', 'Variables FORGE_* du dépôt', async () => {
+				if (p.buildMode === 'builder') return { status: 'ok', detail: 'Plus utilisées : la configuration reste dans Forge.' };
 				const expected = buildRepoVariables({ mode: p.deployMode, composeFile: p.composeFile, workdir: p.workdir, postDeploy: p.postDeploy, appService: p.appService, appPort: p.appPort, dbService: p.dbService, dbKind: p.dbKind });
 				const current = new Map((await github.api.listVariables(p.repoOwner, p.repoName, githubEnvironmentFor(p.environment))).map((v) => [v.name, v.value]));
 				const diffs = Object.entries(expected).filter(([k, v]) => (current.get(k) ?? '') !== v).map(([k, v]) => `${k} : ${current.get(k) ?? '∅'} → ${v || '∅'}`);
@@ -104,7 +106,7 @@ export class UpgradeService {
 
 	async apply(p: ProjectRow, keys: string[]): Promise<number> {
 		if (this.s.repos.jobs.activeForProject(p.id)) throw new UserFacingError('Un job est déjà en cours pour ce projet.');
-		const items = UPGRADE_KEYS.filter((k) => keys.includes(k));
+		const items = UPGRADE_KEYS.filter((k) => keys.includes(k) && !(p.buildMode === 'builder' && (k === 'workflow' || k === 'variables')));
 		if (items.length === 0) throw new UserFacingError('Choisissez au moins un élément à mettre à niveau.');
 		return this.engine.enqueue({ type: 'upgrade', projectId: p.id, params: { items, onlyVars: true, forceFirewall: true } }).id;
 	}

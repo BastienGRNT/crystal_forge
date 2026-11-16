@@ -21,6 +21,9 @@ export const containerStep: StepDefinition = {
 			ctx.log('info', 'Lecture de la configuration réseau de TOUS les CT et VM…');
 			const used = await proxmox.usedIps(guests);
 			const reserved = repos.projects.reservedAllocations();
+			// Le CT de build garde son CTID et son IP même éteint.
+			if (settings.get('builder.ctid')) reserved.ctids.push(Number(settings.get('builder.ctid')));
+			if (settings.get('builder.ip')) reserved.ips.push(settings.get('builder.ip'));
 			const ctid =
 				p.ctid ??
 				nextFreeCtid(

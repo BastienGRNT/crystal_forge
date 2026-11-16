@@ -3,6 +3,7 @@ import { workflowFileFor } from '$lib/domain/environments';
 import type { GhRun } from '../../ports';
 import type { StepContext, StepDefinition } from '../types';
 import { fmtDuration } from './common';
+import { builderDeploy } from './builder-deploy';
 
 const CONCLUSION_FR: Record<string, string> = {
 	success: 'réussi',
@@ -102,8 +103,17 @@ export const pipelineStep: StepDefinition = {
 	async run(ctx) {
 		const { github, repos, probe, settings } = ctx.services;
 		const p = ctx.project();
-		const runId = await findOrStartRun(ctx);
-		if (runId === null) {
+		const viaBuilder = p.buildMode === 'builder' || ctx.params.migrate === true;
+		const runId = viaBuilder ? null : await findOrStartRun(ctx);
+		if (viaBuilder) {
+			if (!ctx.state.deployed) {
+				await builderDeploy(ctx);
+				// Le code est en ligne même si la vérification HTTPS échoue : la surveillance ne le redéploie pas en boucle.
+				if (!ctx.dryRun && typeof ctx.state.sha === 'string') ctx.updateProject({ deployedSha: ctx.state.sha });
+				ctx.state.deployed = true;
+				ctx.save();
+			}
+		} else if (runId === null) {
 			ctx.log('dry', '[DRY-RUN] Suivi du run GitHub simulé.');
 		} else {
 			ctx.state.runId = runId;

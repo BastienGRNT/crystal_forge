@@ -47,6 +47,17 @@ export const projects = sqliteTable(
 		envUpdatedAt: integer('env_updated_at'),
 		/** Empreinte SHA-256 de la clé d'hôte SSH (TOFU). */
 		sshHostKey: text('ssh_host_key'),
+		/**
+		 * runner : ancien mode, runner GitHub + workflow dans le dépôt, build dans le CT.
+		 * builder : Forge construit les images sur le CT de build et les installe par SSH.
+		 */
+		buildMode: text('build_mode', { enum: ['runner', 'builder'] }).notNull().default('runner'),
+		/** Dossier du code dans le CT (null = dossier du runner, gardé après migration pour conserver les volumes). */
+		deployDir: text('deploy_dir'),
+		/** Commit actuellement déployé (mode builder). */
+		deployedSha: text('deployed_sha'),
+		/** Déploiement automatique à chaque push sur la branche (mode builder). */
+		autoDeploy: integer('auto_deploy', { mode: 'boolean' }).notNull().default(true),
 		status: text('status', { enum: ['draft', 'deploying', 'active', 'error', 'deleting', 'deleted'] })
 			.notNull()
 			.default('draft'),

@@ -1009,6 +1009,16 @@ class FakeNpm implements NpmApi {
 // =================================================================================
 
 class FakeSsh implements SshApi {
+	async pipe(from: SshTarget, fromCmd: string, to: SshTarget, toCmd: string, opts: { onProgress?: (bytes: number) => void } = {}) {
+		const a = await this.exec(from, 'true');
+		const b = await this.exec(to, 'true');
+		const bytes = 180 * 1024 * 1024;
+		await delay(800, 1500);
+		opts.onProgress?.(bytes / 2);
+		await delay(600, 1200);
+		return { from: { ...a, stderr: '' }, to: { ...b, stdout: 'Loaded image: demo-app:latest\n' }, bytes };
+	}
+
 	async exec(target: SshTarget, command: string, opts: { onOutput?: (chunk: string) => void; stdin?: Buffer } = {}): Promise<SshResult> {
 		await delay(150, 400);
 		const g = guestByIp(target.host);
@@ -1057,6 +1067,26 @@ class FakeSsh implements SshApi {
 			setTimeout(() => {
 				for (const r of world().repos.values()) for (const x of r.runners) if (x.name === guest.name) x.online = true;
 			}, 2500);
+			return { code: 0, stdout: out.join(''), stderr: '', hostKey };
+		}
+
+		if (command.includes(': forge-build=config')) {
+			const name = command.match(/-p '([a-z0-9_-]+)'/)?.[1] ?? guest.name.replace(/-/g, '');
+			return { code: 0, stdout: JSON.stringify({ name, services: { app: { build: { context: '.' } }, db: { image: 'postgres:17' } } }), stderr: '', hostKey };
+		}
+		if (command.includes(': forge-build=build')) {
+			await emit('#1 [internal] load build definition from Dockerfile\n', 300);
+			await emit('#5 [2/4] RUN npm ci\n', 900);
+			await emit('#8 [4/4] RUN npm run build\n', 900);
+			await emit('#9 exporting to image\n#9 naming to docker.io/library/demo-app done\n', 300);
+			return { code: 0, stdout: out.join(''), stderr: '', hostKey };
+		}
+		if (command.includes(': forge-build=up')) {
+			await emit(' Container app-1  Recreated\n Container app-1  Started\n', 600);
+			return { code: 0, stdout: out.join(''), stderr: '', hostKey };
+		}
+		if (command.includes(': forge-build=clean')) {
+			await emit('Total reclaimed space: 3.2GB\n', 500);
 			return { code: 0, stdout: out.join(''), stderr: '', hostKey };
 		}
 

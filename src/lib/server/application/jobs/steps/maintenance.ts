@@ -16,7 +16,7 @@ const meta = (r: ResourceRow) => {
 };
 
 /** Supprime UNE ressource créée par Forge. Toujours via les passerelles (garde + propriété). */
-async function teardownResource(ctx: StepContext, r: ResourceRow): Promise<void> {
+export async function teardownResource(ctx: StepContext, r: ResourceRow): Promise<void> {
 	const { proxmox, github, dns, proxy, repos } = ctx.services;
 	const [repoFull, rest] = r.externalId.includes(':') ? (r.externalId.split(/:(.*)/s) as [string, string]) : [r.externalId, ''];
 	const [owner, repo] = repoFull.split('/') as [string, string];

@@ -92,5 +92,15 @@ export const actions: Actions = {
 			return fail(400, { error: errorMessage(err) });
 		}
 		redirect(303, `/jobs/${id}`);
+	},
+	clean: async ({ params }) => {
+		const f = forge();
+		let id: number;
+		try {
+			id = f.projects.cleanContainer(f.projects.get(params.slug));
+		} catch (err) {
+			return fail(400, { error: errorMessage(err) });
+		}
+		redirect(303, `/jobs/${id}`);
 	}
 };

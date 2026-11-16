@@ -6,6 +6,7 @@ import { workflowStep } from './steps/workflow';
 import { dnsStep } from './steps/dns';
 import { proxyRepointStep, proxyStep } from './steps/proxy';
 import { pipelineStep } from './steps/pipeline';
+import { cleanCtStep, removeRunnerStep } from './steps/migrate';
 import { firewallStep } from './steps/firewall';
 import { pruneCacheStep } from './steps/build-cache';
 import { dbBackupStep, dbRestoreStep } from './steps/database';
@@ -41,6 +42,8 @@ export const STEPS: Record<string, StepDefinition> = Object.fromEntries(
 		proxyStep,
 		proxyRepointStep,
 		pipelineStep,
+		removeRunnerStep,
+		cleanCtStep,
 		powerStep,
 		moveStorageStep,
 		approvalStep,
@@ -63,7 +66,16 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
 	deploy: {
 		type: 'deploy',
 		label: 'Déploiement initial',
-		steps: (p) => [...(p.needsApproval ? ['approval'] : []), 'ct', 'firewall', 'runner', 'secrets', 'workflow', 'dns', 'npm', 'pipeline'],
+		steps: (p) => [
+			...(p.needsApproval ? ['approval'] : []),
+			'ct',
+			'firewall',
+			// Nouveaux projets : déployés par le CT de build, sans runner ni workflow GitHub.
+			...(p.builder ? [] : ['runner', 'secrets', 'workflow']),
+			'dns',
+			'npm',
+			'pipeline'
+		],
 		onStart: setStatus('deploying'),
 		onSuccess: setStatus('active'),
 		onFailure: setStatus('error')
@@ -164,6 +176,20 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
 			];
 			return map.filter(([k]) => items.has(k)).map(([, step]) => step);
 		}
+	},
+	migrate_builder: {
+		type: 'migrate_builder',
+		label: 'Passage au CT de build',
+		// Déploiement par le CT de build d'abord : le runner n'est retiré que si le site tourne.
+		steps: () => ['pipeline', 'remove_runner'],
+		onSuccess: (ctx) => {
+			if (ctx.project().status === 'error') setStatus('active')(ctx);
+		}
+	},
+	clean_ct: {
+		type: 'clean_ct',
+		label: 'Nettoyage du CT',
+		steps: () => ['clean_ct']
 	},
 	rollback: {
 		type: 'rollback',

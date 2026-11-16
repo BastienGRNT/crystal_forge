@@ -11,6 +11,7 @@
 	import Terminal from '@lucide/svelte/icons/terminal';
 	import Eraser from '@lucide/svelte/icons/eraser';
 	import Wrench from '@lucide/svelte/icons/wrench';
+	import Hammer from '@lucide/svelte/icons/hammer';
 	import { BUILD_CACHE_AUTO_PRUNE_BYTES, formatBytes } from '$lib/domain/build-cache';
 	import PageHeader from '$lib/components/molecules/page-header.svelte';
 	import SectionCard from '$lib/components/molecules/section-card.svelte';
@@ -65,11 +66,41 @@
 			{#each m.failed as f (f)}<p class="text-warning">✗ {f}</p>{/each}
 		</Alert.Description>
 	</Alert.Root>
+{:else if form && 'migrated' in form}
+	<Alert.Root class="mb-6 border-success/40"><Hammer class="text-success" /><Alert.Description>{form.migrated?.length ? `${form.migrated.length} projet(s) en cours de passage sur le CT de build, l'un après l'autre : suivez-les dans Jobs.` : 'Aucun projet à migrer (ou un job est déjà en cours sur eux).'}</Alert.Description></Alert.Root>
 {:else if form && 'pruned' in form}
 	<Alert.Root class="mb-6 border-success/40"><Eraser class="text-success" /><Alert.Description>{form.pruned?.length ? `${form.pruned.length} job(s) « Nettoyage du cache de build » en file : suivez-les dans Jobs.` : 'Rien à lancer : un job est déjà en cours sur ces projets.'}</Alert.Description></Alert.Root>
 {:else if form && 'queued' in form}
 	<Alert.Root class="mb-6 border-success/40"><ShieldCheck class="text-success" /><Alert.Description>{form.queued?.length ? `${form.queued.length} job(s) « Pare-feu du CT » en file : suivez-les dans Jobs.` : 'Tous les pare-feu sont déjà à jour.'}</Alert.Description></Alert.Root>
 {/if}
+
+<SectionCard title="CT de build" icon={Hammer} class="mb-6">
+	{#await data.builder}
+		<Skeleton class="h-10 w-full" />
+	{:then b}
+		<div class="space-y-3 text-sm">
+			<p class="text-muted-foreground">
+				Un seul CT construit les images Docker de tous les projets, puis s'éteint après {b.idleMin} min sans build. Les CT des projets ne construisent plus rien : ils n'ont besoin que de la RAM de l'app.
+				Chaque push sur la branche d'un projet est détecté par Forge en moins d'une minute et déployé automatiquement (plus de runner ni de workflow GitHub).
+			</p>
+			<p>
+				{#if b.status === 'absent'}<span class="text-muted-foreground">Pas encore créé : il le sera au premier build ({b.cores} cœurs, {b.memoryMb} Mo, {b.diskGb} Go).</span>
+				{:else}<span class={b.status === 'running' ? 'text-success' : 'text-muted-foreground'}>CT {b.ctid} · {b.ip} · {b.status === 'running' ? 'allumé' : 'éteint'}</span> · {b.cores} cœurs, {b.memoryMb} Mo, {b.diskGb} Go{/if}
+			</p>
+			{#if data.runnerProjects.length}
+				<div class="rounded-md border border-warning/40 p-3">
+					<p class="mb-2">{data.runnerProjects.length} projet(s) utilisent encore l'ancien runner GitHub : {data.runnerProjects.map((p) => p.slug).join(', ')}.</p>
+					<p class="mb-3 text-xs text-muted-foreground">La migration redéploie chaque projet par le CT de build, puis retire le runner, le workflow, le secret et les variables du dépôt et nettoie le CT. Les données (volumes, base) ne bougent pas. Si un déploiement échoue, le projet garde son runner.</p>
+					<form method="POST" action="?/migrateAll" use:enhance>
+						<Button type="submit" size="sm"><Hammer /> Tout migrer vers le CT de build</Button>
+					</form>
+				</div>
+			{:else}
+				<p class="text-success">Tous les projets sont déployés par le CT de build.</p>
+			{/if}
+		</div>
+	{/await}
+</SectionCard>
 
 {#await data.report}
 	<div class="grid gap-6 lg:grid-cols-2">

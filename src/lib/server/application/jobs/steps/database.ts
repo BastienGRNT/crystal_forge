@@ -5,7 +5,7 @@ import { GENERATED_COMPOSE_FILE } from '$lib/domain/workflow';
 import type { ProjectRow } from '$server/infrastructure/db/schema';
 import { DbCommand, type DbLocation } from '../../gateways';
 import type { StepDefinition } from '../types';
-import { runnerRepoDir } from './common';
+import { projectDir } from './common';
 
 /** Emplacement de la base du projet, ou erreur claire si elle n'est pas configurée. */
 export function dbLocation(p: ProjectRow): DbLocation {
@@ -13,7 +13,7 @@ export function dbLocation(p: ProjectRow): DbLocation {
 		throw new Error('Aucune base PostgreSQL / MySQL / MariaDB configurée pour ce projet (onglet Base de données).');
 	}
 	return {
-		repoDir: runnerRepoDir(p),
+		repoDir: projectDir(p),
 		workdir: p.workdir,
 		composeFile: p.deployMode === 'dockerfile' ? GENERATED_COMPOSE_FILE : (p.composeFile ?? 'docker-compose.yml'),
 		service: p.dbService,

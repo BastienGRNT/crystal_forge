@@ -367,6 +367,14 @@ export interface SshResult {
 
 export interface SshApi {
 	exec(target: SshTarget, command: string, opts?: { timeoutMs?: number; onOutput?: (chunk: string) => void; stdin?: Buffer }): Promise<SshResult>;
+	/** Sortie binaire de `fromCmd` envoyée sur l'entrée de `toCmd` (relais par Forge, sans fichier). */
+	pipe(
+		from: SshTarget,
+		fromCmd: string,
+		to: SshTarget,
+		toCmd: string,
+		opts?: { timeoutMs?: number; onProgress?: (bytes: number) => void }
+	): Promise<{ from: SshResult; to: SshResult; bytes: number }>;
 }
 
 export interface ProbeApi {

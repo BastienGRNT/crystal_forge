@@ -13,6 +13,11 @@ export function runnerRepoDir(p: ProjectRow): string {
 	return `${RUNNER_HOME}/_work/${p.repoName}/${p.repoName}`;
 }
 
+/** Dossier du projet dans son CT : dossier Forge, sinon celui de l'ancien runner (volumes conservés). */
+export function projectDir(p: ProjectRow): string {
+	return p.deployDir ?? runnerRepoDir(p);
+}
+
 export function sizeOf(p: ProjectRow) {
 	return effectiveSize(p.size, p);
 }

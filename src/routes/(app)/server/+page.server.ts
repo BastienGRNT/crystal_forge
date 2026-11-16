@@ -1,15 +1,28 @@
 import { fail } from '@sveltejs/kit';
 import { forge } from '$server/container';
 import { errorMessage } from '$lib/domain/errors';
+import { builderInfo } from '$server/application/builder';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = ({ locals, depends }) => {
 	depends('forge:server');
 	// Contrôles en lecture seule, chargés en différé (plusieurs appels Proxmox / NPM).
-	return { report: forge().health.run(locals.clientIp ?? null) };
+	const f = forge();
+	const runnerProjects = f.repos.projects
+		.list()
+		.filter((p) => p.buildMode === 'runner' && p.ctid && p.status !== 'deleted')
+		.map((p) => ({ slug: p.slug, name: p.name, status: p.status }));
+	return { report: f.health.run(locals.clientIp ?? null), builder: builderInfo(f), runnerProjects };
 };
 
 export const actions: Actions = {
+	migrateAll: async () => {
+		try {
+			return { migrated: forge().projects.migrateAllToBuilder() };
+		} catch (err) {
+			return fail(400, { error: errorMessage(err) });
+		}
+	},
 	firewalls: async () => {
 		const f = forge();
 		try {

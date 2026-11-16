@@ -3,6 +3,7 @@
  * la première connexion enregistre l'empreinte, les suivantes l'exigent.
  */
 import { createHash } from 'node:crypto';
+import { PassThrough, type Readable, type Writable } from 'node:stream';
 import ssh2 from 'ssh2';
 import { ExternalApiError } from '$lib/domain/errors';
 import type { SshApi, SshResult, SshTarget } from '$server/application/ports';
@@ -38,6 +39,15 @@ const IDLE_MS = 30_000;
 /** OpenSSH accepte 10 sessions par connexion (MaxSessions) : on reste en dessous. */
 const MAX_CHANNELS = 8;
 
+interface RunOptions {
+	timeoutMs?: number;
+	onOutput?: (chunk: string) => void;
+	stdin?: Buffer | Readable;
+	/** Sortie standard binaire envoyée ici (au lieu d'être gardée en texte). */
+	stdout?: Writable;
+	onBytes?: (n: number) => void;
+}
+
 export class SshClient implements SshApi {
 	readonly #pool = new Map<string, PooledConnection>();
 
@@ -45,7 +55,37 @@ export class SshClient implements SshApi {
 		return this.#execOnce(target, command, opts, true);
 	}
 
-	async #execOnce(target: SshTarget, command: string, opts: { timeoutMs?: number; onOutput?: (chunk: string) => void; stdin?: Buffer }, retry: boolean): Promise<SshResult> {
+	async pipe(from: SshTarget, fromCmd: string, to: SshTarget, toCmd: string, opts: { timeoutMs?: number; onProgress?: (bytes: number) => void } = {}) {
+		const pass = new PassThrough({ highWaterMark: 4 * 1024 * 1024 });
+		let bytes = 0;
+		let lastReport = 0;
+		const toP = this.#execOnce(to, toCmd, { timeoutMs: opts.timeoutMs, stdin: pass }, true);
+		// La destination a fini (ou échoué) avant la source : on vide le tube pour que la source se termine.
+		void toP.finally(() => pass.resume()).catch(() => {});
+		const fromP = this.#execOnce(
+			from,
+			fromCmd,
+			{
+				timeoutMs: opts.timeoutMs,
+				stdout: pass,
+				onBytes: (n) => {
+					bytes += n;
+					if (bytes - lastReport >= 64 * 1024 * 1024) {
+						lastReport = bytes;
+						opts.onProgress?.(bytes);
+					}
+				}
+			},
+			true
+		).catch((err) => {
+			pass.end();
+			throw err;
+		});
+		const [fromRes, toRes] = await Promise.all([fromP, toP]);
+		return { from: fromRes, to: toRes, bytes };
+	}
+
+	async #execOnce(target: SshTarget, command: string, opts: RunOptions, retry: boolean): Promise<SshResult> {
 		const { pooled, reused } = this.#acquire(target);
 		try {
 			const hostKey = await pooled.ready;
@@ -149,7 +189,7 @@ export class SshClient implements SshApi {
 		return pooled;
 	}
 
-	#run(pooled: PooledConnection, target: SshTarget, hostKey: string, command: string, opts: { timeoutMs?: number; onOutput?: (chunk: string) => void; stdin?: Buffer }): Promise<SshResult> {
+	#run(pooled: PooledConnection, target: SshTarget, hostKey: string, command: string, opts: RunOptions): Promise<SshResult> {
 		return new Promise((resolve, reject) => {
 			let stdout = '';
 			let stderr = '';
@@ -179,18 +219,31 @@ export class SshClient implements SshApi {
 							finish(() => reject(new ExternalApiError('SSH', `commande interrompue sur ${target.host}${signal ? ` (signal ${signal})` : ''}`)));
 						} else finish(() => resolve({ code, stdout, stderr, hostKey }));
 					})
-					.on('data', (d: Buffer) => {
+					.on('end', () => opts.stdout?.end());
+				if (opts.stdout) {
+					// Flux binaire : pause de la source quand la destination est pleine (contre-pression).
+					stream.on('data', (d: Buffer) => {
+						opts.onBytes?.(d.length);
+						if (!opts.stdout!.write(d)) {
+							stream.pause();
+							opts.stdout!.once('drain', () => stream.resume());
+						}
+					});
+				} else {
+					stream.on('data', (d: Buffer) => {
 						const s = d.toString('utf8');
 						stdout += s;
 						opts.onOutput?.(s);
 					});
+				}
 				stream.stderr.on('data', (d: Buffer) => {
 					const s = d.toString('utf8');
 					stderr += s;
 					opts.onOutput?.(s);
 				});
 				// Entrée standard (fichier importé) : envoyée puis fermée.
-				if (opts.stdin) stream.end(opts.stdin);
+				if (Buffer.isBuffer(opts.stdin)) stream.end(opts.stdin);
+				else if (opts.stdin) opts.stdin.pipe(stream);
 			};
 			try {
 				pooled.conn.exec(command, onChannel);

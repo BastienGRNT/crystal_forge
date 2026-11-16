@@ -11,6 +11,10 @@ export const runnerStep: StepDefinition = {
 	async run(ctx) {
 		const { github, shell, redactor } = ctx.services;
 		const p = ctx.project();
+		if (p.buildMode === 'builder') {
+			ctx.log('info', 'Déploiement par le CT de build : pas de runner GitHub dans le CT.');
+			return;
+		}
 		const ip = requireIp(ctx);
 		const target = () => ({ ip, sshHostKey: ctx.project().sshHostKey });
 

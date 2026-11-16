@@ -133,6 +133,7 @@
 			{#snippet actions()}
 				<StatusBadge status={g.status} />
 				{#if running}
+					<form method="POST" action="?/clean" use:enhance class="contents"><Button type="submit" variant="outline" size="sm" disabled={!!data.activeJob} title="Cache de build et images Docker inutilisées (jamais les volumes)">Nettoyer</Button></form>
 					<Button variant="outline" size="sm" disabled={!!data.activeJob} onclick={() => ask('reboot', 'Redémarrer le CT ?', "L'application sera indisponible quelques secondes.")}><RotateCw /> Redémarrer</Button>
 					<Button variant="outline" size="sm" disabled={!!data.activeJob} onclick={() => ask('shutdown', 'Éteindre le CT ?', "Arrêt propre (60 s max). L'application sera hors ligne.")}><Power /> Éteindre</Button>
 					<Button variant="ghost" size="sm" class="text-danger" disabled={!!data.activeJob} onclick={() => ask('stop', 'Forcer l’arrêt du CT ?', 'Arrêt brutal, comme débrancher la prise. Préférez « Éteindre ».')}><Square /> Forcer l'arrêt</Button>
@@ -196,7 +197,10 @@
 			<Alert.Root class="border-warning/40 text-warning">
 				<HardDrive />
 				<Alert.Title>Disque plein à {Math.round(diskRatio * 100)} %</Alert.Title>
-				<Alert.Description class="text-warning/90">Agrandissez-le ci-dessous (à chaud, sans redémarrage), ou faites le ménage (images Docker, anciens dumps).</Alert.Description>
+				<Alert.Description class="text-warning/90">
+					<p>Agrandissez-le ci-dessous (à chaud, sans redémarrage), ou faites le ménage : cache de build et images Docker inutilisées (les volumes et les images en service ne sont jamais touchés).</p>
+					<form method="POST" action="?/clean" use:enhance class="mt-2"><Button type="submit" size="sm" variant="outline" disabled={!!data.activeJob}>Nettoyer le CT</Button></form>
+				</Alert.Description>
 			</Alert.Root>
 		{/if}
 

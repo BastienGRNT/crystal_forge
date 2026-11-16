@@ -954,15 +954,44 @@ export class ShellGateway {
 		t: ShellTarget,
 		user: 'root' | 'github',
 		command: string,
-		opts: { summary?: string; onOutput?: (s: string) => void; timeoutMs?: number } = {}
+		opts: { summary?: string; onOutput?: (s: string) => void; timeoutMs?: number; stdin?: Buffer } = {}
 	): Promise<SshResult> {
 		return this.d.guard.run({
 			system: 'ssh',
 			action: 'exec',
 			summary: `${user}@${t.ip} $ ${opts.summary ?? command}`,
 			check: () => this.#checks(t, command),
-			execute: () => this.#exec(t, user, command, opts.onOutput, opts.timeoutMs),
+			execute: () => this.#exec(t, user, command, opts.onOutput, opts.timeoutMs, opts.stdin),
 			simulate: () => ({ code: 0, stdout: '', stderr: '', hostKey: t.sshHostKey ?? '' })
+		});
+	}
+
+	/** Transfert binaire d'un CT Forge à un autre (images Docker du CT de build vers un projet). */
+	pipe(
+		from: { t: ShellTarget; user: 'root' | 'github'; command: string },
+		to: { t: ShellTarget; user: 'root' | 'github'; command: string },
+		opts: { summary: string; timeoutMs?: number; onProgress?: (bytes: number) => void }
+	): Promise<{ from: SshResult; to: SshResult; bytes: number }> {
+		return this.d.guard.run({
+			system: 'ssh',
+			action: 'pipe',
+			summary: `${from.user}@${from.t.ip} → ${to.user}@${to.t.ip} · ${opts.summary}`,
+			check: () => {
+				this.#checks(from.t, from.command);
+				this.#checks(to.t, to.command);
+			},
+			execute: async () => {
+				const res = await this.d
+					.apis()
+					.ssh.pipe(this.#target(from.t, from.user), from.command, this.#target(to.t, to.user), to.command, { timeoutMs: opts.timeoutMs, onProgress: opts.onProgress });
+				if (!from.t.sshHostKey && res.from.hostKey) this.onHostKey(from.t.ip, res.from.hostKey);
+				if (!to.t.sshHostKey && res.to.hostKey) this.onHostKey(to.t.ip, res.to.hostKey);
+				return res;
+			},
+			simulate: () => {
+				const r = { code: 0, stdout: '', stderr: '', hostKey: '' };
+				return { from: r, to: r, bytes: 0 };
+			}
 		});
 	}
 
@@ -1022,6 +1051,17 @@ export class ReadCommand {
 		const n = Math.min(Math.max(Math.trunc(tail), 10), 2000);
 		const svc = service && /^[a-zA-Z0-9_.-]+$/.test(service) ? ` ${service}` : '';
 		return new ReadCommand(`cd ${shq(`${repoDir}/${workdir}`)} && docker compose -f ${shq(composeFile)} logs --no-color --timestamps --tail ${n}${svc}`);
+	}
+	/** Repli quand `docker compose ps` échoue (variable manquante…) : conteneurs du projet compose, par étiquette. */
+	static dockerPsByProject(name: string) {
+		if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) throw new SafetyViolation('compose.name', `Nom de projet compose invalide : ${name}`);
+		return new ReadCommand(`docker ps -a --filter ${shq(`label=com.docker.compose.project=${name}`)} --format '{{json .}}'`);
+	}
+	/** Repli de `docker compose logs` : journaux d'un conteneur nommé. */
+	static dockerLogs(container: string, tail: number) {
+		if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(container)) throw new SafetyViolation('docker.name', `Conteneur invalide : ${container}`);
+		const n = Math.min(Math.max(Math.trunc(tail), 10), 2000);
+		return new ReadCommand(`docker logs --timestamps --tail ${n} ${shq(container)} 2>&1`);
 	}
 	/** Versions et état des mises à jour automatiques du CT (lecture seule). */
 	static versions() {

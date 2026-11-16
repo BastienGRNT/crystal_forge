@@ -14,7 +14,7 @@ export const load: PageServerLoad = async ({ params, depends }) => {
 	} catch (err) {
 		runsError = errorMessage(err);
 	}
-	return { runs, runsError, jobs: f.jobs.list({ projectId: p.id, limit: 30 }) };
+	return { runs, runsError, build: { buildMode: p.buildMode, autoDeploy: p.autoDeploy, deployedSha: p.deployedSha, branch: p.branch, hasCt: !!p.ctid }, jobs: f.jobs.list({ projectId: p.id, limit: 30 }) };
 };
 
 export const actions: Actions = {
@@ -27,5 +27,21 @@ export const actions: Actions = {
 			return fail(400, { error: errorMessage(err) });
 		}
 		redirect(303, `/jobs/${id}`);
+	},
+	migrate: async ({ params }) => {
+		const f = forge();
+		let id: number;
+		try {
+			id = f.projects.migrateToBuilder(f.projects.get(params.slug));
+		} catch (err) {
+			return fail(400, { error: errorMessage(err) });
+		}
+		redirect(303, `/jobs/${id}`);
+	},
+	autoDeploy: async ({ params, request }) => {
+		const f = forge();
+		const on = (await request.formData()).get('on') === '1';
+		f.projects.setAutoDeploy(f.projects.get(params.slug), on);
+		return { autoDeploySaved: true };
 	}
 };

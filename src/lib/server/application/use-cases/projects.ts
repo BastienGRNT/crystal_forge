@@ -1,5 +1,6 @@
 /** Cas d'usage sur les projets : création + déploiement, .env, domaines, conteneur, suppression. */
 import { DEFAULT_SLEEP_MINUTES } from '$lib/domain/sleep';
+import { composeProjectName, composeServiceOf, missingVariables, newDeployDir } from '$lib/domain/builder';
 import { detectDeployMode, isValidServiceName, normalizeWorkdir, repoPath } from '$lib/domain/compose-detect';
 import { buildFqdn, isValidSubdomain, isValidZone, normalizeSubdomain, servesDomain } from '$lib/domain/domain-name';
 import { errorMessage, RamTightError, SafetyViolation, UserFacingError } from '$lib/domain/errors';
@@ -15,7 +16,7 @@ import { ReadCommand } from '../gateways';
 import type { JobEngine } from '../jobs/engine';
 import type { PowerAction } from '../ports';
 import { envAad, type ForgeServices } from '../services';
-import { runnerRepoDir, sizeOf } from '../jobs/steps/common';
+import { projectDir, sizeOf } from '../jobs/steps/common';
 import { analyzeCompose, type DbKind } from '$lib/domain/compose-analysis';
 import { checkEnvAgainst, type ComposeEnvRef } from '$lib/domain/env-template';
 import { findEnvTemplate, type WizardService } from './wizard';
@@ -199,7 +200,10 @@ export class ProjectService {
 			size,
 			status: 'draft',
 			sleepAfterMin: environment === 'development' ? DEFAULT_SLEEP_MINUTES : null,
-			ownerId: limits && creator ? creator.id : null
+			ownerId: limits && creator ? creator.id : null,
+			// Déployé par le CT de build : ni runner ni workflow dans le dépôt.
+			buildMode: 'builder',
+			deployDir: newDeployDir(repo.name)
 		});
 		// Le créateur gère son projet (niveau « édition ») ; les réglages sensibles restent à l'admin.
 		if (limits && creator) this.auth.setMember(creator.id, project.id, 'edit');
@@ -209,7 +213,11 @@ export class ProjectService {
 		});
 		for (const d of domains) repos.domains.create({ projectId: project.id, ...d, status: 'pending' });
 
-		const job = this.engine.enqueue({ type: 'deploy', projectId: project.id, params: limits?.requiresApproval ? { needsApproval: true, requestedBy: creator?.username } : {} });
+		const job = this.engine.enqueue({
+			type: 'deploy',
+			projectId: project.id,
+			params: { builder: true, ...(limits?.requiresApproval ? { needsApproval: true, requestedBy: creator?.username } : {}) }
+		});
 		return { project: repos.projects.get(project.id) as ProjectRow, jobId: job.id };
 	}
 
@@ -293,7 +301,34 @@ export class ProjectService {
 		return this.engine.enqueue({ type: 'redeploy', projectId: p.id, params: { forceDispatch: true } }).id;
 	}
 
+	/** Passe un projet du runner GitHub au CT de build (déploiement, puis retrait du runner). */
+	migrateToBuilder(p: ProjectRow): number {
+		this.#assertNoActiveJob(p);
+		if (p.buildMode === 'builder') throw new UserFacingError('Ce projet est déjà déployé par le CT de build.');
+		if (!p.ctid || !p.ip) throw new UserFacingError('Le projet n’a pas encore de CT : terminez d’abord son déploiement.');
+		return this.engine.enqueue({ type: 'migrate_builder', projectId: p.id, params: { migrate: true } }).id;
+	}
+
+	/** Tous les projets encore sur un runner (un job chacun, exécutés l'un après l'autre). */
+	migrateAllToBuilder(): number[] {
+		return this.s.repos.projects
+			.list()
+			.filter((p) => p.buildMode === 'runner' && p.ctid && p.ip && (p.status === 'active' || p.status === 'error') && !this.s.repos.jobs.activeForProject(p.id))
+			.map((p) => this.engine.enqueue({ type: 'migrate_builder', projectId: p.id, params: { migrate: true } }).id);
+	}
+
+	setAutoDeploy(p: ProjectRow, on: boolean): void {
+		this.s.repos.projects.update(p.id, { autoDeploy: on });
+	}
+
+	cleanContainer(p: ProjectRow): number {
+		this.#assertNoActiveJob(p);
+		if (!p.ctid || !p.ip) throw new UserFacingError('Le projet n’a pas encore de CT.');
+		return this.engine.enqueue({ type: 'clean_ct', projectId: p.id, params: {} }).id;
+	}
+
 	async runs(p: ProjectRow) {
+		if (p.buildMode === 'builder') return [];
 		return this.s.github.api.listWorkflowRuns(p.repoOwner, p.repoName, workflowFileFor(p.environment), 25);
 	}
 
@@ -454,7 +489,7 @@ export class ProjectService {
 		let servicesError: string | null = null;
 		if (running && p.ip) {
 			try {
-				const res = await this.s.shell.read({ ip: p.ip, sshHostKey: p.sshHostKey }, ReadCommand.composePs(runnerRepoDir(p), p.workdir, this.#composeFile(p)));
+				const res = await this.s.shell.read({ ip: p.ip, sshHostKey: p.sshHostKey }, ReadCommand.composePs(projectDir(p), p.workdir, this.#composeFile(p)));
 				services = res.stdout
 					.split('\n')
 					.filter((l) => l.trim().startsWith('{'))
@@ -472,7 +507,13 @@ export class ProjectService {
 									.join(', ')
 							: ''
 					}));
-				if (res.code !== 0 && services.length === 0) servicesError = res.stderr.trim() || 'docker compose ps a échoué (le premier déploiement a-t-il eu lieu ?)';
+				if (res.code !== 0 && services.length === 0) {
+					// compose refuse de lire le fichier (variable manquante…) : on liste les conteneurs par étiquette.
+					services = await this.#servicesByLabel(p);
+					const missing = missingVariables(res.stderr);
+					if (services.length === 0) servicesError = res.stderr.trim() || 'docker compose ps a échoué (le premier déploiement a-t-il eu lieu ?)';
+					else if (missing.length) servicesError = `Variable(s) absente(s) du .env : ${missing.join(', ')} — ajoutez-les dans l'onglet Variables.`;
+				}
 			} catch (err) {
 				servicesError = errorMessage(err);
 			}
@@ -482,8 +523,41 @@ export class ProjectService {
 
 	async containerLogs(p: ProjectRow, tail: number, service?: string): Promise<string> {
 		if (!p.ip) throw new UserFacingError('Le projet n’a pas de CT.');
-		const res = await this.s.shell.read({ ip: p.ip, sshHostKey: p.sshHostKey }, ReadCommand.composeLogs(runnerRepoDir(p), p.workdir, this.#composeFile(p), tail, service));
+		const t = { ip: p.ip, sshHostKey: p.sshHostKey };
+		const res = await this.s.shell.read(t, ReadCommand.composeLogs(projectDir(p), p.workdir, this.#composeFile(p), tail, service));
+		if (res.code !== 0 && !res.stdout.trim()) {
+			// Repli sans compose (variable manquante…) : journaux des conteneurs du projet.
+			const list = (await this.#servicesByLabel(p)).filter((c) => !service || c.service === service);
+			if (list.length) {
+				const parts = await Promise.all(
+					list.map(async (c) => {
+						const r = await this.s.shell.read(t, ReadCommand.dockerLogs(c.name, tail));
+						return r.stdout.split('\n').filter((l) => l).map((l) => `${c.service} | ${l}`).join('\n');
+					})
+				);
+				return this.s.redactor.redact(parts.join('\n'));
+			}
+		}
 		return this.s.redactor.redact(res.stdout + (res.stderr ? `\n${res.stderr}` : ''));
+	}
+
+	async #servicesByLabel(p: ProjectRow) {
+		const name = composeProjectName(`${projectDir(p)}/${p.workdir || '.'}`);
+		if (!p.ip || !name) return [];
+		const res = await this.s.shell.read({ ip: p.ip, sshHostKey: p.sshHostKey }, ReadCommand.dockerPsByProject(name)).catch(() => null);
+		if (!res || res.code !== 0) return [];
+		return res.stdout
+			.split('\n')
+			.filter((l) => l.trim().startsWith('{'))
+			.map((l) => JSON.parse(l) as Record<string, unknown>)
+			.map((r) => ({
+				name: String(r.Names ?? ''),
+				service: composeServiceOf(String(r.Labels ?? '')),
+				state: String(r.State ?? ''),
+				status: String(r.Status ?? ''),
+				image: String(r.Image ?? ''),
+				ports: String(r.Ports ?? '')
+			}));
 	}
 
 	#composeFile(p: ProjectRow) {

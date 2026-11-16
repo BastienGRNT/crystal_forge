@@ -9,6 +9,10 @@ export const workflowStep: StepDefinition = {
 	async run(ctx) {
 		const { github } = ctx.services;
 		const p = ctx.project();
+		if (p.buildMode === 'builder') {
+			ctx.log('info', 'Déploiement par le CT de build : pas de workflow GitHub Actions à commiter.');
+			return;
+		}
 		const WORKFLOW_PATH = workflowPathFor(p.environment);
 
 		const existing = await github.api.getFile(p.repoOwner, p.repoName, WORKFLOW_PATH, p.branch);

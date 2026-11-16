@@ -50,11 +50,11 @@ const OPEN_PAGES = new Set(['/projects', '/jobs', '/logout', '/account', '/api/e
 
 /** Niveau exigé par un onglet de projet, pour les actions de formulaire (nom après « ?/ »). */
 const TAB_ACTIONS: Record<string, Record<string, AccessLevel | 'admin'>> = {
-	deployments: { redeploy: 'deploy' },
+	deployments: { redeploy: 'deploy', autoDeploy: 'deploy', migrate: 'admin' },
 	variables: { reveal: 'edit', save: 'edit' },
 	domains: { add: 'edit', repair: 'edit', remove: 'edit' },
 	database: { configure: 'edit', query: 'edit', backup: 'edit', import: 'edit', restore: 'edit' },
-	container: { power: 'edit', resize: 'admin', firewall: 'admin', sleep: 'edit', wake: 'deploy' },
+	container: { power: 'edit', resize: 'admin', firewall: 'admin', sleep: 'edit', wake: 'deploy', clean: 'edit' },
 	settings: { update: 'admin', upgrade: 'admin', delete: 'admin', protection: 'admin', accessUsers: 'admin' }
 };
 

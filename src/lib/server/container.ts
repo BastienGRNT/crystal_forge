@@ -39,6 +39,7 @@ import { resetWorld } from './infrastructure/mock/world';
 import { exportPublicKey, importProvisioning } from './application/provisioning';
 import { OffsiteBackupService } from './application/use-cases/offsite';
 import { SleepService } from './application/use-cases/sleep';
+import { AutoDeployService } from './application/use-cases/auto-deploy';
 import { startWakeServer } from './infrastructure/wake/server';
 import { ResticClient } from './infrastructure/clients/restic';
 import { createHmac } from 'node:crypto';
@@ -213,11 +214,8 @@ function build(): Forge {
 	const apis = fake ? () => fake : liveApis(settings, accounts, config.masterKey);
 
 	const lookup = {
-		forgeIps: () =>
-			projects
-				.list()
-				.map((p) => p.ip)
-				.filter((x): x is string => !!x),
+		// Le CT de build fait partie des cibles SSH autorisées (créé et possédé par Forge).
+		forgeIps: () => [...projects.list().map((p) => p.ip), settings.get('builder.ip')].filter((x): x is string => !!x),
 		forgeRepos: () => projects.list().map((p) => `${p.repoOwner}/${p.repoName}`)
 	};
 	const deps = {
@@ -241,6 +239,10 @@ function build(): Forge {
 		dns: new DnsGateway(deps),
 		proxy: new ProxyGateway(deps),
 		shell: new ShellGateway(deps, (ip, fp) => {
+			if (ip === settings.get('builder.ip')) {
+				if (!settings.get('builder.hostKey')) settings.set({ 'builder.hostKey': fp });
+				return;
+			}
 			const p = projects.list().find((x) => x.ip === ip);
 			if (p && !p.sshHostKey) projects.update(p.id, { sshHostKey: fp });
 		}),
@@ -399,6 +401,9 @@ function build(): Forge {
 			.catch((err) => console.warn(`[forge] Sauvegarde hors serveur : ${err instanceof Error ? err.message : err}`));
 	setTimeout(offsiteTick, 3 * 60_000).unref();
 	setInterval(offsiteTick, 3600_000).unref();
+	// Déploiement automatique à chaque commit (projets sur le CT de build) et extinction du CT de build inutilisé.
+	const autoDeploy = new AutoDeployService(services, engine);
+	setInterval(() => void autoDeploy.tick().catch((err) => console.warn(`[auto-deploy] ${err instanceof Error ? err.message : err}`)), AutoDeployService.CHECK_EVERY_MS).unref();
 	// Serveurs de dev : mise en veille après inactivité, réveil par la page d'attente (port à part).
 	setInterval(() => void sleep.tick().catch((err) => console.warn(`[veille] ${err instanceof Error ? err.message : err}`)), SleepService.CHECK_EVERY_MS).unref();
 	if (config.mode === 'live') {
