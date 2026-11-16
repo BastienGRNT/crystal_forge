@@ -31,7 +31,7 @@ export const SETTING_DEFS = {
 	'proxmox.pool': { default: 'forge' },
 	'proxmox.templateId': { default: '900' },
 	'proxmox.storage': { default: 'local' },
-	'proxmox.backupStorage': { default: 'local' },
+	'proxmox.backupStorage': { default: 'forge-backups' },
 	'proxmox.bridge': { default: 'nat' },
 	'network.gateway': { default: '10.10.10.1' },
 	'network.cidr': { default: '24' },
@@ -51,6 +51,8 @@ export const SETTING_DEFS = {
 	'ctid.max': { default: '599' },
 	/** Rempli par infra/02 depuis PROD_CTIDS (infra/lib.sh), la source unique. */
 	'safety.protectedCtids': { default: '' },
+	/** CT qui héberge Forge (rempli par infra/02) : sauvegardé et réglé comme un CT critique. */
+	'safety.forgeCtid': { default: '150' },
 	/** Obligatoire : seuls les dépôts de ce compte sont utilisables. */
 	'github.owner': { default: '' },
 	'github.token': { default: '', secret: true },
@@ -180,6 +182,12 @@ export class SettingsService {
 			protectedCtids: this.list('safety.protectedCtids').map(Number).filter(Number.isFinite),
 			reservedIps: this.list('network.reservedIps')
 		};
+	}
+
+	/** CT critiques (NPM, Forge…) : sauvegardés chaque nuit, RAM plancher et priorité CPU haute. */
+	criticalCtids(): number[] {
+		const ids = [...this.list('safety.protectedCtids'), this.get('safety.forgeCtid')].map(Number).filter((n) => Number.isInteger(n) && n > 0);
+		return [...new Set(ids)];
 	}
 
 	repoMap(): Record<string, string> {

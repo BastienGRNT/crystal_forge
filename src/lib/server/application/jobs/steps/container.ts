@@ -1,4 +1,5 @@
 /** Étape 1 — Conteneur : clone du template, configuration, démarrage, attente SSH. */
+import { CPU_WEIGHTS } from '$lib/domain/host-maintenance';
 import { candidateIps, nextFreeCtid, pickFreeIp } from '$lib/domain/allocation';
 import { buildNet0 } from '$lib/domain/network';
 import type { StepDefinition } from '../types';
@@ -74,6 +75,8 @@ export const containerStep: StepDefinition = {
 			cores: size.cores,
 			memory: size.memoryMb,
 			swap: size.swapMb,
+			// Priorité CPU : la prod passe avant les builds et les sites de dev quand l'hôte sature.
+			cpuunits: CPU_WEIGHTS[ctx.project().environment],
 			net0: buildNet0({ ip, cidr: settings.int('network.cidr'), gateway: settings.get('network.gateway'), bridge: settings.get('proxmox.bridge') }),
 			onboot: 1,
 			// Le clone hérite de protection=1 du template (infra/03) : sans ce 0, Proxmox

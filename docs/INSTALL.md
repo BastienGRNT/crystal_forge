@@ -18,10 +18,10 @@ bash /root/crystal_forge/infra/bootstrap.sh
 | 2 | `00a-network.sh` | bridge `nat` 10.10.10.1/24, routage IPv4, MASQUERADE, redirection 80/443 → NPM, zone conntrack (§0.1) |
 | 3 | `00b-tailscale.sh` | Tailscale sur l'hôte, route 10.10.10.0/24 (§0.2) |
 | 4 | `00c-npm-ct.sh` | CT 100 Nginx Proxy Manager à 10.10.10.2 (§0.3) |
-| 5 | `01-backup-job.sh` | sauvegardes quotidiennes des CT de prod |
+| 5 | `09-host-setup.sh` | réglages root de l'hôte : plafond du cache ZFS, swap, stockage `forge-backups` pour les sauvegardes |
 | 6 | `04-forge-ct.sh` | CT 150 qui héberge Forge |
 | 7 | `08-forge-updater.sh --from` | déploie Forge (crée le `.env` et la clé maître au premier passage) et active le bouton de mise à jour |
-| 8 | `02-proxmox-forge-access.sh` | pool, utilisateur et jeton API, **remis directement à Forge** (aucun copier-coller) |
+| 8 | `02-proxmox-forge-access.sh` | pool, utilisateur et jeton API (avec les droits d'entretien), **remis directement à Forge** (aucun copier-coller) |
 | 9 | `03-template-docker-runner.sh` | template 900, avec la clé SSH que Forge a générée à son premier démarrage |
 | 10 | `05-firewall.sh` | pare-feu du datacenter, sans filtrer l'hôte |
 | 11 | `07-conntrack-zone.sh` | NAT des CT avec pare-feu (déjà fait par 00a sur un serveur neuf) |
@@ -102,7 +102,7 @@ bash infra/00c-npm-ct.sh
 NPM_IMAGE=jc21/nginx-proxy-manager:<version> bash infra/00c-npm-ct.sh   # version figée
 ```
 
-Le script crée le CT 100 `npm` : 10.10.10.2, 1 cœur, 1 Go, 8 Go, Docker, NPM dans `/opt/npm` avec ses données dans `/opt/npm/data` et `/opt/npm/letsencrypt`. Seuls les ports 80/443 sont redirigés depuis Internet ; l'administration (:81) n'est joignable que via Tailscale. Le CT est hors du pool `forge` et fait partie des CT protégés : Forge ne peut ni le modifier ni le supprimer, et 01 le sauvegarde.
+Le script crée le CT 100 `npm` : 10.10.10.2, 1 cœur, 1 Go, 8 Go, Docker, NPM dans `/opt/npm` avec ses données dans `/opt/npm/data` et `/opt/npm/letsencrypt`. Seuls les ports 80/443 sont redirigés depuis Internet ; l'administration (:81) n'est joignable que via Tailscale. Le CT est hors du pool `forge` et fait partie des CT protégés : Forge ne peut ni l'arrêter ni le supprimer ; il règle seulement sa RAM et sa priorité CPU, et le sauvegarde chaque nuit.
 
 Si NPM répond déjà sur `10.10.10.2:81`, le script ne fait rien. Il ne modifie jamais un CT existant.
 
@@ -110,27 +110,23 @@ Si NPM répond déjà sur `10.10.10.2:81`, le script ne fait rien. Il ne modifie
 
 ## 1. Scripts Proxmox
 
-### 1.1 Sauvegardes — `01-backup-job.sh`
+### 1.1 Réglages de l'hôte et entretien automatique — `09-host-setup.sh`
 
-```bash
-bash infra/01-backup-job.sh
-```
+Lancé par `bootstrap.sh`. Il ne fait que ce qui exige root sur l'hôte :
 
-Crée le job `forge-prod-daily` (03:30, zstd, `keep-daily=7`) pour les CT 100, 401, 402, 403 et 404, et propose une première sauvegarde immédiate.
+- plafond du cache ZFS (ARC) à 10 % de la RAM et `vm.swappiness=10` ;
+- stockage `forge-backups` (`/var/lib/vz/forge-backups`), le seul où Forge peut gérer des sauvegardes ;
+- `tmpdir` de vzdump sur ce stockage (`/etc/vzdump.conf`), pour ne pas remplir `/` en mode `suspend` ;
+- bascule des anciens jobs `forge-*` sur `forge-backups`. Les anciennes sauvegardes restent sur `local`.
 
-À savoir :
+**Tout le reste est fait par Forge**, toutes les 6 h (et avec le bouton « Entretenir maintenant » de *Santé du serveur*) :
 
-- le mode `snapshot` n'existe pas sur un stockage `dir` : Proxmox **bascule tout seul en mode `suspend`**. Le CT est gelé quelques secondes, ce qui reste cohérent pour Postgres ;
-- en mode `suspend`, vzdump recopie d'abord **tout le CT** dans un dossier temporaire, `/var/tmp` par défaut, qui est sur `/` (21 Go seulement). Le CT 402 (~14 Go) suffit à remplir le disque de l'hôte. Le job et la sauvegarde immédiate passent donc `--tmpdir /var/lib/vz/dump`, le dossier du stockage `local` ;
-- `keep-daily=7` élague **aussi les sauvegardes manuelles** des mêmes CT (un `vzdump` lancé à la main, la sauvegarde initiale…). Seules les sauvegardes protégées y échappent. À la fin, le script liste celles qui ne viennent pas du job et propose de les protéger :
+- jobs de sauvegarde `forge-prod-daily` (NPM et Forge, 03:30) et `forge-projects-daily` (tout le pool `forge`, nouveaux projets compris, 04:00), zstd, 7 quotidiennes + 4 hebdomadaires ;
+- RAM de NPM portée à 1 Go s'il étouffe (jamais réduite, plafond 4 Go) et priorité CPU haute pour NPM et Forge ;
+- priorité CPU des projets : production avant développement ;
+- nettoyage des caches de build Docker au-delà de 2 Go.
 
-  ```bash
-  pvesh set /nodes/ns3125740/storage/local/content/<volid> --protected 1
-  ```
-
-  Une sauvegarde protégée n'est jamais élaguée ; pour la supprimer, retirez d'abord la protection (`--protected 0`) ;
-- les notes des sauvegardes utilisent `-` et non `—` : le tiret long provoquait « Wide character in print » et une note mal encodée dans `jobs.cfg` ;
-- les sauvegardes sont sur **le même disque** que les CT. Elles protègent d'une erreur, pas d'une panne disque. Prévoyez une copie externe : Proxmox Backup Server, OVH Backup Storage, ou un `rclone` des fichiers `/var/lib/vz/dump/*.zst`.
+À savoir : les sauvegardes sont sur **le même disque** que les CT. Elles protègent d'une erreur, pas d'une panne disque. Prévoyez une copie externe (Proxmox Backup Server, OVH Backup Storage, ou `rclone` de `/var/lib/vz/forge-backups/dump/`).
 
 ### 1.2 Accès de Forge — `02-proxmox-forge-access.sh`
 

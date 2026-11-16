@@ -5,12 +5,12 @@
 	import { assessHostRam, SIZES, type SizeKey } from '$lib/domain/sizes';
 	import { cn } from '$lib/utils';
 
-	let { value = $bindable<SizeKey>('M'), freeMb, totalMb }: { value?: SizeKey; freeMb: number | null; totalMb: number | null } = $props();
+	let { value = $bindable<SizeKey>('M'), freeMb, totalMb, committedMb }: { value?: SizeKey; freeMb: number | null; totalMb: number | null; committedMb?: number } = $props();
 </script>
 
 <div class="grid gap-3 sm:grid-cols-3" role="radiogroup" aria-label="Taille du conteneur">
 	{#each Object.values(SIZES) as s (s.key)}
-		{@const ram = freeMb !== null && totalMb !== null ? assessHostRam(totalMb, totalMb - freeMb, s) : null}
+		{@const ram = freeMb !== null && totalMb !== null ? assessHostRam(totalMb, totalMb - freeMb, s, committedMb) : null}
 		{@const active = value === s.key}
 		<button
 			type="button"
@@ -41,6 +41,7 @@
 					)}
 				>
 					{#if ram.level === 'insufficient'}RAM insuffisante sur l'hôte
+					{:else if ram.overcommitted}Hôte déjà très engagé ({Math.round(((ram.committedAfterMb ?? 0) / (totalMb ?? 1)) * 100)} % de sa RAM promise)
 					{:else}Reste {(ram.afterMb / 1024).toFixed(1)} Go libres sur l'hôte{/if}
 				</p>
 			{/if}

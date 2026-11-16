@@ -152,13 +152,15 @@ export interface FakeWorld {
 	ghKeyPair: { publicKey: string; privateKey: string } | null;
 	clusterFirewall: Record<string, string | number>;
 	firewalls: Map<number, { options: Record<string, string | number>; rules: FakeFwRule[] }>;
-	backupJobs: { id: string; enabled: boolean; schedule: string; vmid: string | null; all: boolean; storage: string | null }[];
+	backupJobs: { id: string; enabled: boolean; schedule: string; vmid: string | null; all: boolean; pool: string | null; storage: string | null }[];
 	/** Bases simulées, par nom de CT. */
 	databases: Map<string, FakeTable[]>;
 	/** Dumps SQL simulés sur les CT, par slug de projet. */
 	dbBackups: Map<string, FakeDbBackup[]>;
 	/** CT où les mises à jour de sécurité automatiques sont activées. */
 	unattended: Set<number>;
+	/** Cache de build Docker simulé par CT (octets). */
+	buildCache: Map<number, number>;
 }
 
 const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString().replace('T', ' ').slice(0, 19);
@@ -622,8 +624,9 @@ function seed(): FakeWorld {
 		// Pare-feu du datacenter désactivé, comme sur un Proxmox fraîchement installé.
 		clusterFirewall: { enable: 0 },
 		unattended: new Set(),
+		buildCache: new Map(),
 		firewalls: new Map([[500, { options: { enable: 1, policy_in: 'DROP', policy_out: 'ACCEPT', ipfilter: 1, macfilter: 1 }, rules: [] }]]),
-		backupJobs: [{ id: 'forge-prod-daily', enabled: true, schedule: '03:30', vmid: '100,401,402,403,404', all: false, storage: 'local' }],
+		backupJobs: [{ id: 'forge-prod-daily', enabled: true, schedule: '03:30', vmid: '100,401,402,403,404', all: false, pool: null, storage: 'local' }],
 		databases: new Map([['crystal-notes', demoTables('crystal-notes')]]),
 		dbBackups: new Map([
 			[

@@ -9,13 +9,18 @@
 #   00a  bridge nat, NAT, 80/443 → NPM     (seulement ce qui manque)
 #   00b  Tailscale, route 10.10.10.0/24    (seulement ce qui manque)
 #   00c  CT 100 Nginx Proxy Manager        (si NPM ne répond pas sur 10.10.10.2:81)
-#   01   sauvegarde quotidienne de la prod (si « forge-prod-daily » absent)
+#   09   réglages root de l'hôte : cache ZFS, swap, stockage des sauvegardes
+#        (seulement ce qui manque)
 #   04   CT 150 qui héberge Forge          (si CT 150 absent)
 #   08   déploiement de Forge + service de mise à jour (si Forge ne répond pas)
-#   02   pool, utilisateur, jeton API      (si forge@pve absent) — remis directement à Forge
+#   02   pool, utilisateur, jeton API      (si absent ou s'il lui manque des droits) — remis à Forge
 #   03   template 900 Docker + runner      (si CT 900 absent) — clé SSH lue dans Forge
 #   05   pare-feu datacenter               (si désactivé)
 #   07   zone conntrack fwbr+              (seulement ce qui manque)
+#
+# Ensuite, Forge entretient seul le serveur (toutes les 6 h) : jobs de sauvegarde,
+# RAM de NPM, priorités CPU, caches de build. Relancer ce script après une mise à
+# jour de Forge est sans risque : il ne refait que ce qui manque.
 #
 # Le dépôt complet doit être sur l'hôte (ex. /root/crystal_forge) : 08 déploie
 # Forge depuis le dossier parent de infra/.
@@ -60,9 +65,9 @@ bash "$INFRA_DIR/00b-tailscale.sh"
 title "00c · Nginx Proxy Manager"
 bash "$INFRA_DIR/00c-npm-ct.sh"
 
-if step 01 "Sauvegarde quotidienne de la prod" '[[ "$(pvesh get /cluster/backup --output-format json | json_has forge-prod-daily)" == 1 ]]'; then
-	bash "$INFRA_DIR/01-backup-job.sh"
-fi
+title "09 · Réglages de l'hôte (cache ZFS, swap, stockage des sauvegardes)"
+bash "$INFRA_DIR/09-host-setup.sh"
+
 
 if step 04 "CT 150 de Forge" 'ct_exists 150'; then
 	bash "$INFRA_DIR/04-forge-ct.sh"
@@ -73,7 +78,10 @@ if step 08 "Déploiement de Forge et service de mise à jour" 'forge_up && pct e
 	bash "$INFRA_DIR/08-forge-updater.sh" --from "$REPO_DIR"
 fi
 
-if step 02 "Accès Proxmox de Forge (forge@pve)" '[[ "$(pvesh get /access/users --output-format json | json_has forge@pve)" == 1 ]]'; then
+# Droits à jour = le jeton peut gérer ses sauvegardes et régler la RAM du CT 150 (ajoutés le 2026-11-16).
+token_has() { pveum user token permissions forge@pve forge --path "$1" --output-format json 2>/dev/null | perl -MJSON::PP -e 'local $/; my $j=decode_json(<STDIN>); my %p = map { %{$_} } values %$j; exit !exists $p{$ARGV[0]}' "$2"; }
+if step 02 "Accès Proxmox de Forge (forge@pve)" 'token_has /storage/forge-backups Datastore.Allocate && token_has / Sys.Modify && token_has /vms/150 VM.Config.Memory'; then
+	info "Si le jeton existe déjà, répondez « N » à « Régénérer le jeton ? » : seuls les droits sont mis à jour."
 	FORGE_DELIVER_CT=150 bash "$INFRA_DIR/02-proxmox-forge-access.sh"
 else
 	info "Pour régénérer le jeton (et le remettre à Forge) : FORGE_DELIVER_CT=150 bash infra/02-proxmox-forge-access.sh"

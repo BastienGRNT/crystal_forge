@@ -4,9 +4,12 @@
  * manquant, la commande ou le script à lancer soi-même sur l'hôte.
  */
 import { errorMessage } from '$lib/domain/errors';
-import { hostMemoryInUse } from '$lib/domain/sizes';
+import { committedMemoryMb, hostMemoryInUse, MAX_MEMORY_COMMIT_RATIO } from '$lib/domain/sizes';
+import { BUILD_CACHE_AUTO_PRUNE_BYTES, formatBytes, parseBuildCacheUsage } from '$lib/domain/build-cache';
+import type { ProjectRow } from '$server/infrastructure/db/schema';
 import { hasFirewallFlag, INTERNET_PROBE_URL, parseInternetProbe } from '$lib/domain/firewall';
 import { inCidr } from '$lib/domain/network';
+import { backupJobChanges, CPU_WEIGHTS, criticalCtPlan, desiredBackupJobs, FORGE_BACKUP_STORAGE } from '$lib/domain/host-maintenance';
 import { ReadCommand } from '../gateways';
 import { CONNTRACK_FIX } from '../jobs/steps/common';
 import type { ForgeServices } from '../services';
@@ -24,7 +27,14 @@ export interface HealthCheck {
 	fix?: string;
 	/** Projets dont le pare-feu peut être (ré)appliqué depuis cette page. */
 	projects?: { slug: string; name: string; ctid: number; upToDate: boolean }[];
+	/** Caches de build par projet, avec bouton de nettoyage. */
+	caches?: { slug: string; ctid: number; bytes: number }[];
 }
+
+/** Réglages de l'hôte qui exigent root (cache ZFS, swap, stockage des sauvegardes) : faits par l'installeur. */
+const HOST_TUNING_FIX = 'bash infra/bootstrap.sh';
+/** Sauvegardes : Forge crée et corrige ses jobs lui-même (toutes les 6 h ou bouton ci-dessous). */
+const AUTO_BACKUP_FIX = 'Forge corrige seul (entretien toutes les 6 h) — ou bouton « Entretenir maintenant ». Si ça échoue (droits) : bash infra/bootstrap.sh.';
 
 const GiB = 1024 ** 3;
 
@@ -123,6 +133,79 @@ export class ServerHealthService {
 						: { id: 'ct-disks', group: 'Proxmox', label: 'Disques des CT', status: 'ok', detail: 'Tous les CT démarrés sont sous 80 % de remplissage.' };
 				},
 				{ id: 'ct-disks', group: 'Proxmox', label: 'Disques des CT' }
+			),
+			safe(
+				async () => {
+					const n = await proxmox.nodeStatus();
+					const out: HealthCheck[] = [];
+					const totalMb = n.memory.total / 1024 ** 2;
+					// Limites promises aux CT démarrés vs RAM réelle.
+					const guests = (await guestsP).filter((g) => g.status === 'running' && !g.template);
+					const committed = committedMemoryMb(guests);
+					const ratio = committed / totalMb;
+					const top = [...guests].sort((a, b) => b.maxmem - a.maxmem).slice(0, 4);
+					out.push({
+						id: 'ram-commit',
+						group: 'Capacité',
+						label: 'RAM promise aux CT',
+						status: ratio > 1.5 ? 'error' : ratio > MAX_MEMORY_COMMIT_RATIO ? 'warn' : 'ok',
+						detail: `${(committed / 1024).toFixed(1)} Go de limites pour ${(totalMb / 1024).toFixed(1)} Go de RAM (${Math.round(ratio * 100)} %). Plus gros : ${top.map((g) => `CT ${g.vmid} ${(g.maxmem / 1024 ** 3).toFixed(1)} Go`).join(', ')}.`,
+						fix:
+							ratio > MAX_MEMORY_COMMIT_RATIO
+								? `Au-delà de ${Math.round(MAX_MEMORY_COMMIT_RATIO * 100)} %, des builds simultanés font swapper l'hôte et ralentissent TOUS les sites. Forge demande désormais confirmation avant d'en ajouter ; réduisez les projets surdimensionnés (onglet Conteneur → Taille).`
+								: undefined
+					});
+					// CT à leur limite : ils swappent et ralentissent (sans planter).
+					const choking = guests.filter((g) => g.maxmem > 0 && g.mem / g.maxmem >= 0.9);
+					const forgeSlugs = new Map(repos.projects.list().filter((p) => p.ctid && p.status !== 'deleted').map((p) => [p.ctid as number, p.slug]));
+					out.push(
+						choking.length
+							? {
+									id: 'ct-memory',
+									group: 'Capacité',
+									label: 'CT à court de RAM',
+									status: choking.some((g) => protectedIds.includes(g.vmid)) ? 'error' : 'warn',
+									detail: choking.map((g) => `CT ${g.vmid} ${g.name} : ${Math.round(g.mem / 1024 ** 2)}/${Math.round(g.maxmem / 1024 ** 2)} Mo`).join(' · '),
+									fix: choking.some((g) => forgeSlugs.has(g.vmid))
+										? `Projets Forge : onglet Conteneur → Taille (${choking.filter((g) => forgeSlugs.has(g.vmid)).map((g) => forgeSlugs.get(g.vmid)).join(', ')}). Autres CT : pct set <ctid> --memory <Mo>`
+										: 'pct set <ctid> --memory <Mo> (sur l’hôte, appliqué à chaud)'
+								}
+							: { id: 'ct-memory', group: 'Capacité', label: 'CT à court de RAM', status: 'ok', detail: 'Aucun CT démarré au-delà de 90 % de sa limite.' }
+					);
+					// Swap de l'hôte : plein = l'hôte n'a plus de marge, tout ralentit.
+					const swapPct = n.swap.total > 0 ? (n.swap.used / n.swap.total) * 100 : 0;
+					out.push({
+						id: 'swap',
+						group: 'Capacité',
+						label: 'Swap de l’hôte',
+						status: n.swap.total === 0 ? 'info' : swapPct > 80 ? 'error' : swapPct > 50 ? 'warn' : 'ok',
+						detail:
+							n.swap.total === 0
+								? 'Aucun swap.'
+								: `${(n.swap.used / 1024 ** 3).toFixed(1)} Go utilisés sur ${(n.swap.total / 1024 ** 3).toFixed(1)} Go (${Math.round(swapPct)} %).${swapPct > 50 ? ' Le script ci-dessous plafonne le cache ZFS et limite le swap (une seule fois par serveur).' : ''}`,
+						fix: swapPct > 50 ? HOST_TUNING_FIX : undefined
+					});
+					return out;
+				},
+				{ id: 'ram-commit', group: 'Capacité', label: 'RAM promise aux CT' }
+			),
+			safe(
+				async () => {
+					const rows = await this.buildCaches(await guestsP);
+					const total = rows.reduce((s, r) => s + r.bytes, 0);
+					const big = rows.filter((r) => r.bytes > BUILD_CACHE_AUTO_PRUNE_BYTES);
+					return {
+						id: 'build-cache',
+						group: 'Capacité',
+						label: 'Caches de build Docker',
+						status: rows.length === 0 ? 'info' : big.length ? 'warn' : 'ok',
+						detail: rows.length
+							? `${formatBytes(total)} au total sur ${rows.length} CT. Forge les ramène automatiquement à 2 Go toutes les 6 h ; vider complètement ralentit seulement le prochain build.`
+							: 'Aucun CT de projet démarré joignable.',
+						caches: rows
+					};
+				},
+				{ id: 'build-cache', group: 'Capacité', label: 'Caches de build Docker' }
 			),
 			safe(
 				async () => {
@@ -302,10 +385,10 @@ export class ServerHealthService {
 					const covered = (id: number) => jobs.some((j) => j.enabled && (j.all || (j.vmid ?? '').split(',').map(Number).includes(id)));
 					const missing = prod.filter((id) => !covered(id));
 					return missing.length
-						? { id: 'backup-job', group: 'Sauvegardes', label: 'Sauvegarde quotidienne de la prod', status: 'warn', detail: `CT non couverts par un job de sauvegarde : ${missing.join(', ')}.`, fix: 'bash infra/01-backup-job.sh' }
+						? { id: 'backup-job', group: 'Sauvegardes', label: 'Sauvegarde quotidienne de la prod', status: 'warn', detail: `CT non couverts par un job de sauvegarde : ${missing.join(', ')}.`, fix: AUTO_BACKUP_FIX }
 						: { id: 'backup-job', group: 'Sauvegardes', label: 'Sauvegarde quotidienne de la prod', status: 'ok', detail: `${prod.length} CT couverts (${jobs.filter((j) => j.enabled).map((j) => `${j.id} : ${j.schedule}`).join(', ')}).` };
 				},
-				{ id: 'backup-job', group: 'Sauvegardes', label: 'Sauvegarde quotidienne de la prod', fix: 'bash infra/01-backup-job.sh' }
+				{ id: 'backup-job', group: 'Sauvegardes', label: 'Sauvegarde quotidienne de la prod', fix: AUTO_BACKUP_FIX }
 			),
 			safe(
 				async () => {
@@ -315,10 +398,33 @@ export class ServerHealthService {
 					const stale = ages.filter((a) => !a.last || Date.now() / 1000 - a.last > 36 * 3600);
 					const oldest = Math.min(...ages.map((a) => a.last ?? 0));
 					return stale.length
-						? { id: 'backup-recent', group: 'Sauvegardes', label: 'Sauvegardes récentes', status: 'warn', detail: `Pas de sauvegarde depuis plus de 36 h : CT ${stale.map((a) => a.vmid).join(', ')}.`, fix: 'vzdump <ctid> --storage local --mode snapshot --compress zstd' }
+						? { id: 'backup-recent', group: 'Sauvegardes', label: 'Sauvegardes récentes', status: 'warn', detail: `Pas de sauvegarde depuis plus de 36 h : CT ${stale.map((a) => a.vmid).join(', ')}.`, fix: `Le job de sauvegarde de Forge tourne chaque nuit (stockage ${FORGE_BACKUP_STORAGE}) ; si ça persiste, consultez Proxmox → Tâches.` }
 						: { id: 'backup-recent', group: 'Sauvegardes', label: 'Sauvegardes récentes', status: 'ok', detail: prod.length ? `Toutes de moins de 36 h (la plus ancienne : il y a ${Math.round((Date.now() / 1000 - oldest) / 3600)} h).` : 'Aucun CT de prod en marche.' };
 				},
 				{ id: 'backup-recent', group: 'Sauvegardes', label: 'Sauvegardes récentes' }
+			),
+			safe(
+				async () => {
+					const jobs = (await proxmox.api.backupJobs()).filter((j) => j.enabled);
+					const guests = await guestsP;
+					const projects = repos.projects.list().filter((p) => p.status !== 'deleted' && p.ctid && guests.some((g) => g.vmid === p.ctid));
+					const poolJob = jobs.find((j) => j.pool === pool);
+					const covered = (ctid: number) =>
+						jobs.some((j) => j.all || (j.vmid ?? '').split(',').map(Number).includes(ctid) || (j.pool !== null && guests.some((g) => g.vmid === ctid && g.pool === j.pool)));
+					const missing = projects.filter((p) => !covered(p.ctid as number));
+					const base = { id: 'backup-projects', group: 'Sauvegardes', label: 'Sauvegarde quotidienne des projets' };
+					if (missing.length) {
+						return { ...base, status: 'warn', detail: `Projets sans sauvegarde du CT : ${missing.map((p) => `${p.slug} (CT ${p.ctid})`).join(', ')}.`, fix: AUTO_BACKUP_FIX };
+					}
+					return {
+						...base,
+						status: 'ok',
+						detail: poolJob
+							? `Job « ${poolJob.id} » (${poolJob.schedule}) : tout le pool « ${pool} », les nouveaux projets sont inclus automatiquement.`
+							: `${projects.length} projet(s) couverts. Le job par pool sera créé par Forge au prochain entretien.`
+					};
+				},
+				{ id: 'backup-projects', group: 'Sauvegardes', label: 'Sauvegarde quotidienne des projets' }
 			),
 			safe(
 				async () => {
@@ -356,6 +462,99 @@ export class ServerHealthService {
 			)
 		]);
 		return { checks: groups.flat(), checkedAt: Date.now() };
+	}
+
+	/** Projets dont le CT tourne et répond en SSH. */
+	#runningProjects(guests: { vmid: number; status: string }[]): ProjectRow[] {
+		return this.s.repos.projects.list().filter((p) => p.status !== 'deleted' && p.ctid && p.ip && guests.some((g) => g.vmid === p.ctid && g.status === 'running'));
+	}
+
+	/** Taille du cache de build de chaque projet démarré (lecture seule). */
+	async buildCaches(guests?: { vmid: number; status: string }[]): Promise<{ slug: string; ctid: number; bytes: number }[]> {
+		const list = this.#runningProjects(guests ?? (await this.s.proxmox.guests()));
+		const rows = await Promise.all(
+			list.map(async (p) => {
+				const r = await this.s.shell.read({ ip: p.ip as string, sshHostKey: p.sshHostKey }, ReadCommand.buildCache()).catch(() => null);
+				return r && r.code === 0 ? { slug: p.slug, ctid: p.ctid as number, bytes: parseBuildCacheUsage(r.stdout).buildCacheBytes } : null;
+			})
+		);
+		return rows.filter((r) => r !== null).sort((a, b) => b.bytes - a.bytes);
+	}
+
+	/** Vide le cache de build des projets choisis (un job par projet ; ceux déjà occupés sont sautés). */
+	pruneCaches(slugs: string[], enqueue: (projectId: number) => number): number[] {
+		const ids: number[] = [];
+		for (const p of this.s.repos.projects.list().filter((x) => slugs.includes(x.slug) && x.status !== 'deleted' && x.ctid)) {
+			if (this.s.repos.jobs.activeForProject(p.id)) continue;
+			ids.push(enqueue(p.id));
+		}
+		return ids;
+	}
+
+	/**
+	 * Nettoyage automatique (minuterie) : les CT dont le cache dépasse 2 Go sont ramenés
+	 * à 2 Go en gardant les couches récentes. Passe par la garde d'écriture (DRY_RUN respecté).
+	 */
+	async autoPruneCaches(enqueue: (projectId: number) => number): Promise<string[]> {
+		const big = (await this.buildCaches()).filter((r) => r.bytes > BUILD_CACHE_AUTO_PRUNE_BYTES);
+		const slugs = big.map((r) => r.slug);
+		this.pruneCaches(slugs, enqueue);
+		return slugs;
+	}
+
+	/**
+	 * Entretien automatique (minuterie, et bouton de la page Santé) : jobs de sauvegarde
+	 * « forge-* », réglages des CT critiques (NPM, Forge) et priorité CPU des projets.
+	 * Chaque écriture passe par la garde (DRY_RUN respecté). Renvoie ce qui a été fait / raté.
+	 */
+	async autoMaintain(): Promise<{ done: string[]; failed: string[] }> {
+		const { proxmox, repos, settings } = this.s;
+		const done: string[] = [];
+		const failed: string[] = [];
+		const attempt = async (label: string, fn: () => Promise<unknown>) => {
+			try {
+				await fn();
+				done.push(label);
+			} catch (err) {
+				failed.push(`${label} : ${errorMessage(err)}`);
+			}
+		};
+		const guests = await proxmox.api.guests();
+		const exists = (id: number) => guests.some((g) => g.vmid === id && !g.template && g.type === 'lxc');
+		const critical = settings.criticalCtids().filter(exists);
+
+		// 1. Sauvegardes : NPM + Forge chaque nuit, et tout le pool des projets (nouveaux inclus).
+		const desired = desiredBackupJobs({ criticalCtids: critical, pool: settings.get('proxmox.pool') });
+		for (const c of backupJobChanges(await proxmox.backupJobs(), desired)) {
+			await attempt(`job de sauvegarde ${c.job.id}`, () => proxmox.upsertBackupJob(c.job, c.exists));
+		}
+
+		// 2. CT critiques : priorité CPU haute, RAM au plancher s'ils étouffent.
+		const node = await proxmox.nodeStatus();
+		let hostAvailableMb = Math.round((node.memory.total - hostMemoryInUse(node.memory)) / 1048576);
+		for (const id of critical) {
+			const g = guests.find((x) => x.vmid === id)!;
+			const cfg = await proxmox.guestConfig(id);
+			const plan = criticalCtPlan({
+				memoryMb: Number(cfg.memory ?? Math.round(g.maxmem / 1048576)),
+				usedMb: Math.round(g.mem / 1048576),
+				cpuunits: cfg.cpuunits === undefined ? null : Number(cfg.cpuunits),
+				hostAvailableMb
+			});
+			if (!Object.keys(plan).length) continue;
+			await attempt(`CT ${id} (${g.name}) ${Object.entries(plan).map(([k, v]) => `${k}=${v}`).join(', ')}`, () => proxmox.tuneCriticalCt(id, plan));
+			if (plan.memory) hostAvailableMb -= plan.memory - Number(cfg.memory ?? 0);
+		}
+
+		// 3. Projets : la prod passe avant la dev quand le processeur sature.
+		for (const p of repos.projects.list().filter((x) => x.status !== 'deleted' && x.ctid && exists(x.ctid))) {
+			if (repos.jobs.activeForProject(p.id)) continue;
+			const want = CPU_WEIGHTS[p.environment];
+			const cfg = await proxmox.guestConfig(p.ctid as number).catch(() => null);
+			if (!cfg || Number(cfg.cpuunits ?? 100) === want) continue;
+			await attempt(`priorité CPU de ${p.slug} = ${want}`, () => proxmox.configure(p.ctid as number, { cpuunits: want }));
+		}
+		return { done, failed };
 	}
 
 	/** (Ré)applique le pare-feu des projets qui ne sont pas à jour (un job par projet). */

@@ -16,6 +16,15 @@
 #       /pool/forge                     PVEPoolUser        Pool.Audit : voir à quel pool appartient chaque CT
 #       /storage/local                  PVEDatastoreUser   allouer les disques des clones + vzdump
 #       /sdn/zones/localnetwork/nat     PVESDNUser         utiliser le bridge « nat » (SDN.Use, PVE 8+/9)
+#     Entretien automatique par Forge (aucun script à lancer à la main) :
+#       / (sans propagation)            ForgeBackupJobs    Sys.Modify : créer/modifier SES jobs de sauvegarde
+#                                                          (POST/PUT /cluster/backup l'exigent sur « / » exactement)
+#       /storage/forge-backups          PVEDatastoreAdmin  Datastore.Allocate : options des jobs, rétention
+#                                                          (stockage dédié créé par infra/09 : pas « local »)
+#       /vms/<CT critique> (100, 150)   ForgeCriticalTune  VM.Audit + VM.Backup + VM.Config.Memory + VM.Config.CPU :
+#                                                          RAM plancher de NPM/Forge et priorité CPU, rien d'autre
+#     Le code de Forge ajoute ses propres garde-fous : jobs « forge-* » uniquement, sur
+#     forge-backups uniquement ; RAM des CT critiques jamais réduite, plafonnée à 4 Go.
 #
 # ⚠ Une ACL posée sur /pool/forge REMPLACE, pour ce chemin, les rôles hérités de
 #   « / » (PVEAuditor) : sans PVEPoolUser, le jeton n'a pas Pool.Audit sur le pool,
@@ -30,7 +39,7 @@
 #     (selon les clés) + SDN.Use si net0 change. « features » reste réservé à root@pam.
 #
 # Ce que Forge NE PEUT PAS faire avec ces droits :
-#   • modifier/arrêter/supprimer un CT hors du pool (100, 101, 401-404…) ;
+#   • arrêter/supprimer/reconfigurer un CT hors du pool (sur 100 et 150 : seulement RAM et CPU) ;
 #   • ajouter un CT existant à son pool (il faudrait Pool.Allocate) ;
 #   • brancher un CT sur vmbr0 (SDN.Use limité au bridge « nat ») ;
 #   • modifier les permissions, les utilisateurs, le stockage ou l'hôte.
@@ -55,13 +64,27 @@ SDN_PATH="/sdn/zones/localnetwork/$FORGE_BRIDGE"
 SECRET_FILE="${FORGE_SECRET_FILE:-}"
 DELIVER_CT="${FORGE_DELIVER_CT:-}"
 
-ACLS=(
-	"/|PVEAuditor"
-	"/pool/$FORGE_POOL|PVEVMAdmin"
-	"/pool/$FORGE_POOL|PVEPoolUser"
-	"/storage/$FORGE_STORAGE|PVEDatastoreUser"
-	"$SDN_PATH|PVESDNUser"
+BK_STORAGE="forge-backups"
+# CT critiques (NPM… et Forge lui-même) : Forge règle leur RAM et leur priorité CPU.
+CRITICAL_CTIDS=("${PROD_CTIDS[@]}" ${DELIVER_CT:+"$DELIVER_CT"})
+# Rôles propres à Forge (créés ou remis à jour à chaque passage).
+declare -A ROLES=(
+	[ForgeBackupJobs]="Sys.Modify"
+	[ForgeCriticalTune]="VM.Audit,VM.Backup,VM.Config.Memory,VM.Config.CPU"
 )
+# chemin|rôle|propagation
+ACLS=(
+	"/|PVEAuditor|1"
+	"/|ForgeBackupJobs|0"
+	"/pool/$FORGE_POOL|PVEVMAdmin|1"
+	"/pool/$FORGE_POOL|PVEPoolUser|1"
+	"/storage/$FORGE_STORAGE|PVEDatastoreUser|1"
+	"/storage/$BK_STORAGE|PVEDatastoreAdmin|1"
+	"$SDN_PATH|PVESDNUser|1"
+)
+for id in "${CRITICAL_CTIDS[@]}"; do ACLS+=("/vms/$id|ForgeCriticalTune|0"); done
+# Seuls privilèges non-lecture admis sur un CT de prod (exactement ceux de ForgeCriticalTune).
+CRITICAL_PRIVS="VM.Backup VM.Config.CPU VM.Config.Memory"
 
 require_root
 require_pve
@@ -112,8 +135,11 @@ title "Ce que le script va faire"
 [[ $user_exists -eq 0 ]] && plan "Créer l’utilisateur $PVE_USER (sans mot de passe)"
 [[ $token_exists -eq 0 ]] && plan "Créer le jeton $TOKEN_ID (privsep=1, sans expiration)"
 [[ $regen_token -eq 1 ]] && plan "Supprimer puis recréer le jeton $TOKEN_ID"
+for r in "${!ROLES[@]}"; do plan "Rôle $r = ${ROLES[$r]}"; done
+pvesm status --storage "$BK_STORAGE" >/dev/null 2>&1 || die "Stockage « $BK_STORAGE » absent : lancez d'abord infra/09-host-setup.sh (ou bash infra/bootstrap.sh)."
 for acl in "${ACLS[@]}"; do
-	plan "ACL ${acl%%|*} → ${acl##*|} pour $PVE_USER et $TOKEN_ID"
+	IFS='|' read -r path role prop <<<"$acl"
+	plan "ACL $path → $role$([[ $prop == 0 ]] && echo ' (sans propagation)') pour $PVE_USER et $TOKEN_ID"
 done
 confirm "Appliquer ?"
 
@@ -135,10 +161,17 @@ if [[ $token_exists -eq 0 ]]; then
 	[[ -n "$token_secret" ]] || die "Impossible de lire le secret du jeton."
 fi
 
+existing_roles="$(pveum role list --output-format json | perl -MJSON::PP -e 'local $/; print join("\n", map { $_->{roleid} } @{decode_json(<STDIN>)})')"
+for r in "${!ROLES[@]}"; do
+	if grep -qx "$r" <<<"$existing_roles"; then
+		run pveum role modify "$r" --privs "${ROLES[$r]}"
+	else
+		run pveum role add "$r" --privs "${ROLES[$r]}"
+	fi
+done
 for acl in "${ACLS[@]}"; do
-	path="${acl%%|*}"
-	role="${acl##*|}"
-	run pveum acl modify "$path" --roles "$role" --users "$PVE_USER" --tokens "$TOKEN_ID" --propagate 1
+	IFS='|' read -r path role prop <<<"$acl"
+	run pveum acl modify "$path" --roles "$role" --users "$PVE_USER" --tokens "$TOKEN_ID" --propagate "$prop"
 done
 ok "ACL appliquées."
 
@@ -156,11 +189,19 @@ non_audit_privs() {
 }
 for id in "${PROD_CTIDS[@]}"; do
 	privs="$(non_audit_privs "/vms/$id")" || die "Impossible de lire les droits du jeton sur /vms/$id. NE PAS utiliser ce jeton avant d’avoir vérifié."
-	if [[ -n "$privs" ]]; then
-		die "Le jeton a des droits au-delà de la lecture sur le CT $id : $privs ! Vérifiez les ACL (pveum acl list). NE PAS utiliser ce jeton."
+	if [[ -n "$privs" && "$privs" != "$CRITICAL_PRIVS" ]]; then
+		die "Le jeton a d'autres droits que lecture + RAM/CPU/sauvegarde sur le CT $id : $privs ! Vérifiez les ACL (pveum acl list). NE PAS utiliser ce jeton."
 	fi
-	ok "CT $id : lecture seule (uniquement des privilèges *.Audit)"
+	ok "CT $id : lecture + RAM/CPU/sauvegarde seulement (${privs:-lecture seule})"
 done
+if check_priv "/" Sys.Modify && check_priv "/storage/$BK_STORAGE" Datastore.Allocate; then
+	ok "Sauvegardes : Forge peut gérer ses jobs (Sys.Modify sur /, Datastore.Allocate sur $BK_STORAGE)"
+else
+	warn "Droits de sauvegarde incomplets : Forge ne pourra pas créer ses jobs."
+fi
+if check_priv "/vms/100000" Sys.Modify || check_priv "/storage/$FORGE_STORAGE" Datastore.Allocate; then
+	die "Sys.Modify ou Datastore.Allocate se propage au-delà de ce qui est prévu ! Vérifiez les ACL (pveum acl list)."
+fi
 if check_priv "/pool/$FORGE_POOL" VM.Allocate && check_priv "/pool/$FORGE_POOL" VM.Clone; then
 	ok "Pool $FORGE_POOL : VM.Allocate + VM.Clone présents"
 else
@@ -187,8 +228,8 @@ delivered=0
 if [[ -n "$DELIVER_CT" ]]; then
 	if pct exec "$DELIVER_CT" -- test -d /opt/forge/updates 2>/dev/null; then
 		printf '  %s$ pct exec %s -- … > /opt/forge/updates/provision.json (jeton, CA, CT protégés, via stdin)%s\n' "$C_DIM" "$DELIVER_CT" "$C_RESET"
-		perl -MJSON::PP -e 'local $/; my $ca = do { open my $f, "<", "/etc/pve/pve-root-ca.pem" or die; <$f> }; my %h = ("proxmox.url" => $ARGV[0], "proxmox.node" => $ARGV[1], "proxmox.tokenId" => $ARGV[2], "safety.protectedCtids" => $ARGV[3], "proxmox.tokenSecret" => <STDIN>, "proxmox.caCert" => $ca); $h{"proxmox.tokenSecret"} =~ s/\s+\z//; print encode_json(\%h)' \
-			"https://$FORGE_GATEWAY:8006" "$FORGE_NODE" "$TOKEN_ID" "$(IFS=,; echo "${PROD_CTIDS[*]}")" <<<"$token_secret" \
+		perl -MJSON::PP -e 'local $/; my $ca = do { open my $f, "<", "/etc/pve/pve-root-ca.pem" or die; <$f> }; my %h = ("proxmox.url" => $ARGV[0], "proxmox.node" => $ARGV[1], "proxmox.tokenId" => $ARGV[2], "safety.protectedCtids" => $ARGV[3], "safety.forgeCtid" => $ARGV[4], "proxmox.backupStorage" => $ARGV[5], "proxmox.tokenSecret" => <STDIN>, "proxmox.caCert" => $ca); $h{"proxmox.tokenSecret"} =~ s/\s+\z//; print encode_json(\%h)' \
+			"https://$FORGE_GATEWAY:8006" "$FORGE_NODE" "$TOKEN_ID" "$(IFS=,; echo "${PROD_CTIDS[*]}")" "$DELIVER_CT" "$BK_STORAGE" <<<"$token_secret" \
 			| pct exec "$DELIVER_CT" -- bash -c 'umask 077 && cat >/opt/forge/updates/provision.json.part && chown 1000:1000 /opt/forge/updates/provision.json.part && mv /opt/forge/updates/provision.json.part /opt/forge/updates/provision.json'
 		ok "CT de production protégés remis à Forge : ${PROD_CTIDS[*]}."
 		if [[ -n "$token_secret" ]]; then

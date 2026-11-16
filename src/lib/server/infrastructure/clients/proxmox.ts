@@ -236,13 +236,14 @@ export class ProxmoxClient implements ProxmoxApi {
 	}
 
 	async backupJobs(): Promise<PveBackupJob[]> {
-		const rows = await this.#call<{ id: string; enabled?: number; schedule?: string; vmid?: string; all?: number; storage?: string }[]>('GET', '/cluster/backup');
+		const rows = await this.#call<{ id: string; enabled?: number; schedule?: string; vmid?: string; all?: number; pool?: string; storage?: string }[]>('GET', '/cluster/backup');
 		return rows.map((r) => ({
 			id: r.id,
 			enabled: r.enabled !== 0,
 			schedule: r.schedule ?? '',
 			vmid: r.vmid ?? null,
 			all: r.all === 1,
+			pool: r.pool ?? null,
 			storage: r.storage ?? null
 		}));
 	}
@@ -283,6 +284,14 @@ export class ProxmoxClient implements ProxmoxApi {
 			compress: 'zstd',
 			'notes-template': '{{guestname}} — sauvegarde Forge avant suppression'
 		});
+	}
+
+	async createBackupJob(params: Record<string, string | number>) {
+		await this.#call('POST', '/cluster/backup', params);
+	}
+
+	async updateBackupJob(id: string, params: Record<string, string | number>) {
+		await this.#call('PUT', `/cluster/backup/${encodeURIComponent(id)}`, params);
 	}
 
 	async setCtFirewallOptions(vmid: number, options: Record<string, string | number>) {

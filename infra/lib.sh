@@ -4,16 +4,20 @@
 
 set -Eeuo pipefail
 
-# --- Constantes de l'infrastructure (relevées le 2026-10-14) ------------------
+# --- Constantes de l'infrastructure (relevées le 2026-10-14, revues le 2026-11-16) -
 FORGE_NODE="${FORGE_NODE:-$(hostname)}"
 FORGE_POOL="forge"
 FORGE_BRIDGE="nat"
 FORGE_GATEWAY="10.10.10.1"
 FORGE_STORAGE="local"
 FORGE_OSTEMPLATE="local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst"
-# CT de production : aucun script ne doit les modifier. Source unique : infra/02 remet
-# cette liste à Forge (réglage safety.protectedCtids).
-PROD_CTIDS=(100 101 401 402 403 404)
+# CT hors Forge à protéger : aucun script ne doit les modifier, et Forge refuse d'y
+# toucher. Source unique : infra/02 remet cette liste à Forge (réglage safety.protectedCtids).
+# Audit du 2026-11-16 : 101 et 401-404 n'existent plus ; reste NPM (100).
+# Ni Forge (150, géré par infra/04, 06 et 08) ni les CT de projet (500-599, gérés PAR
+# Forge, déjà protégés par la plage, le pool et la liste des ressources créées) ne
+# doivent figurer ici.
+PROD_CTIDS=(100)
 
 # --- Affichage -----------------------------------------------------------------
 if [[ -t 1 ]]; then

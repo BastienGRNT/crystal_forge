@@ -308,6 +308,25 @@ function build(): Forge {
 		}
 	};
 	engine.start();
+	// Caches de build : ramenés à 2 Go dès qu'ils les dépassent (5 min après le démarrage, puis toutes les 6 h).
+	const pruneCaches = () =>
+		void forge.health
+			.autoPruneCaches((projectId) => engine.enqueue({ type: 'prune_cache', projectId, params: { keepRecent: true } }).id)
+			.then((slugs) => slugs.length && console.log(`[forge] Nettoyage du cache de build lancé : ${slugs.join(', ')}`))
+			.catch((err) => console.warn(`[forge] Nettoyage des caches de build : ${err instanceof Error ? err.message : err}`));
+	setTimeout(pruneCaches, 5 * 60_000).unref();
+	setInterval(pruneCaches, 6 * 3600_000).unref();
+	// Entretien de l'hôte (jobs de sauvegarde, CT critiques, priorités CPU) : 2 min après le démarrage, puis toutes les 6 h.
+	const maintain = () =>
+		void forge.health
+			.autoMaintain()
+			.then(({ done, failed }) => {
+				if (done.length) console.log(`[forge] Entretien : ${done.join(' ; ')}`);
+				if (failed.length) console.warn(`[forge] Entretien en échec : ${failed.join(' ; ')}`);
+			})
+			.catch((err) => console.warn(`[forge] Entretien : ${err instanceof Error ? err.message : err}`));
+	setTimeout(maintain, 2 * 60_000).unref();
+	setInterval(maintain, 6 * 3600_000).unref();
 	console.log(`[forge] Démarré en mode ${config.mode.toUpperCase()} — DRY_RUN ${isDryRun() ? 'ACTIVÉ' : 'désactivé'} — base ${config.databasePath}`);
 	if (config.masterKeyIsDevFallback) console.warn('[forge] ⚠ FORGE_MASTER_KEY absente : clé de démonstration utilisée (mode mock uniquement).');
 	return forge;

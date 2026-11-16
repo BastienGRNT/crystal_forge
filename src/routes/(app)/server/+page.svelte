@@ -9,6 +9,9 @@
 	import Info from '@lucide/svelte/icons/info';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 	import Terminal from '@lucide/svelte/icons/terminal';
+	import Eraser from '@lucide/svelte/icons/eraser';
+	import Wrench from '@lucide/svelte/icons/wrench';
+	import { BUILD_CACHE_AUTO_PRUNE_BYTES, formatBytes } from '$lib/domain/build-cache';
 	import PageHeader from '$lib/components/molecules/page-header.svelte';
 	import SectionCard from '$lib/components/molecules/section-card.svelte';
 	import CopyButton from '$lib/components/molecules/copy-button.svelte';
@@ -41,14 +44,29 @@
 
 <svelte:head><title>Santé du serveur · Forge</title></svelte:head>
 
-<PageHeader title="Santé du serveur" description="Tout ce dont Forge dépend, vérifié en lecture seule. Ce qui touche à l'hôte se règle avec les scripts infra/, que vous lancez vous-même : Forge n'a pas d'accès root au Proxmox.">
+<PageHeader title="Santé du serveur" description="Tout ce dont Forge dépend. Forge entretient seul le serveur toutes les 6 h : sauvegardes de NPM, de Forge et des projets, RAM et priorité CPU des CT, caches de build. Les réglages qui exigent root sur l'hôte sont faits par l'installeur (bash infra/bootstrap.sh).">
 	{#snippet actions()}
+		<form method="POST" action="?/maintain" use:enhance={() => async ({ update }) => { await update(); await refresh(); }}>
+			<Button type="submit" variant="secondary" size="sm"><Wrench /> Entretenir maintenant</Button>
+		</form>
 		<Button variant="outline" size="sm" onclick={refresh} disabled={refreshing}><RefreshCw class={cn(refreshing && 'animate-spin')} /> Revérifier</Button>
 	{/snippet}
 </PageHeader>
 
 {#if form && 'error' in form && form.error}
 	<Alert.Root variant="destructive" class="mb-6"><Alert.Description>{form.error}</Alert.Description></Alert.Root>
+{:else if form && 'maintained' in form && form.maintained}
+	{@const m = form.maintained}
+	<Alert.Root class={cn('mb-6', m.failed.length ? 'border-warning/40' : 'border-success/40')}>
+		<Wrench class={m.failed.length ? 'text-warning' : 'text-success'} />
+		<Alert.Description>
+			{#if !m.done.length && !m.failed.length}Rien à faire : tout est déjà réglé.{/if}
+			{#each m.done as d (d)}<p>✓ {d}</p>{/each}
+			{#each m.failed as f (f)}<p class="text-warning">✗ {f}</p>{/each}
+		</Alert.Description>
+	</Alert.Root>
+{:else if form && 'pruned' in form}
+	<Alert.Root class="mb-6 border-success/40"><Eraser class="text-success" /><Alert.Description>{form.pruned?.length ? `${form.pruned.length} job(s) « Nettoyage du cache de build » en file : suivez-les dans Jobs.` : 'Rien à lancer : un job est déjà en cours sur ces projets.'}</Alert.Description></Alert.Root>
 {:else if form && 'queued' in form}
 	<Alert.Root class="mb-6 border-success/40"><ShieldCheck class="text-success" /><Alert.Description>{form.queued?.length ? `${form.queued.length} job(s) « Pare-feu du CT » en file : suivez-les dans Jobs.` : 'Tous les pare-feu sont déjà à jour.'}</Alert.Description></Alert.Root>
 {/if}
@@ -92,6 +110,24 @@
 								{:else}
 									<p class="ml-7 text-xs text-muted-foreground">→ {c.fix}</p>
 								{/if}
+							{/if}
+							{#if c.caches?.length}
+								{@const big = c.caches.filter((x) => x.bytes > BUILD_CACHE_AUTO_PRUNE_BYTES)}
+								<div class="ml-7 space-y-1.5">
+									<ul class="flex flex-wrap gap-1.5">
+										{#each c.caches as x (x.slug)}
+											<li class={cn('rounded-md border px-2 py-0.5 font-mono text-xs', x.bytes > BUILD_CACHE_AUTO_PRUNE_BYTES ? 'border-warning/40 text-warning' : 'text-muted-foreground')}>
+												{x.slug} · {formatBytes(x.bytes)}
+											</li>
+										{/each}
+									</ul>
+									{#if c.caches.some((x) => x.bytes > 0)}
+										<form method="POST" action="?/caches" use:enhance>
+											{#each big.length ? big : c.caches.filter((x) => x.bytes > 0) as x (x.slug)}<input type="hidden" name="slug" value={x.slug} />{/each}
+											<Button type="submit" size="xs" variant="secondary"><Eraser /> Vider {big.length ? `les ${big.length} cache(s) de plus de 2 Go` : 'tous les caches'}</Button>
+										</form>
+									{/if}
+								</div>
 							{/if}
 							{#if c.projects?.length}
 								<div class="ml-7 space-y-1.5">

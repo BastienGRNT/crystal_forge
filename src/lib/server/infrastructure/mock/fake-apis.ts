@@ -238,6 +238,27 @@ class FakeProxmox implements ProxmoxApi {
 		return world().backupJobs.map((j) => ({ ...j }));
 	}
 
+	async createBackupJob(p: Record<string, string | number>) {
+		await delay();
+		const w = world();
+		if (w.backupJobs.some((j) => j.id === p.id)) throw new ExternalApiError('Proxmox', `Job '${p.id}' already exists`, 500);
+		w.backupJobs.push({ id: String(p.id), enabled: Number(p.enabled ?? 1) === 1, schedule: String(p.schedule), vmid: p.vmid ? String(p.vmid) : null, all: false, pool: p.pool ? String(p.pool) : null, storage: String(p.storage) });
+	}
+
+	async updateBackupJob(id: string, p: Record<string, string | number>) {
+		await delay();
+		const j = world().backupJobs.find((x) => x.id === id);
+		if (!j) throw new ExternalApiError('Proxmox', `No such job '${id}'`, 500);
+		const del = String(p.delete ?? '').split(',');
+		Object.assign(j, {
+			enabled: Number(p.enabled ?? 1) === 1,
+			schedule: String(p.schedule ?? j.schedule),
+			storage: String(p.storage ?? j.storage),
+			vmid: del.includes('vmid') ? null : p.vmid ? String(p.vmid) : j.vmid,
+			pool: del.includes('pool') ? null : p.pool ? String(p.pool) : j.pool
+		});
+	}
+
 	#fw(vmid: number) {
 		const w = world();
 		let fw = w.firewalls.get(vmid);
@@ -317,7 +338,10 @@ class FakeProxmox implements ProxmoxApi {
 
 	async updateConfig(vmid: number, config: Record<string, string | number>) {
 		await delay();
-		const g = this.#requireWrite(vmid, 'VM.Config.Options');
+		// Comme le jeton réel : VM.Config.Memory/CPU sur les CT critiques (100, 150), rien d'autre.
+		const tuneOnly = Object.keys(config).every((k) => k === 'memory' || k === 'cpuunits') && [100, 150].includes(vmid);
+		const g = tuneOnly ? world().guests.get(vmid) : this.#requireWrite(vmid, 'VM.Config.Options');
+		if (!g) throw new ExternalApiError('Proxmox', `Configuration file 'nodes/${NODE}/lxc/${vmid}.conf' does not exist`, 500);
 		if ('features' in config) throw new ExternalApiError('Proxmox', "HTTP 403 changing feature flags is only allowed for root@pam", 403);
 		for (const [k, v] of Object.entries(config)) {
 			g.config[k] = v;
@@ -1102,6 +1126,18 @@ async function fakeDbCommand(guest: FakeGuest, op: string, command: string, stdi
 		return { code: 0, stdout: `${stdin.length}\n`, stderr: '' };
 	}
 	if (op === 'internet') return { code: 0, stdout: '200', stderr: '' };
+	if (op === 'buildcache') {
+		const cache = w.buildCache.get(guest.vmid) ?? (guest.vmid % 3) * 2.4e9 + 3.1e8;
+		w.buildCache.set(guest.vmid, cache);
+		return { code: 0, stdout: `Images\t1.2GB\nContainers\t2.1MB\nLocal Volumes\t310MB\nBuild Cache\t${(cache / 1e9).toFixed(2)}GB\n${Math.round(3.4e9 + cache)} 10737418240\n`, stderr: '' };
+	}
+	if (op === 'prunecache') {
+		await delay(800, 1500);
+		const before = w.buildCache.get(guest.vmid) ?? 0;
+		const after = command.includes('--keep-storage') ? Math.min(before, 2e9) : 0;
+		w.buildCache.set(guest.vmid, after);
+		return { code: 0, stdout: `Total:\t${((before - after) / 1e9).toFixed(2)}GB\n/dev/loop3  9.8G  ${(3.4 + after / 1e9).toFixed(1)}G  6.0G  37% /\n`, stderr: '' };
+	}
 	if (op === 'versions') {
 		return { code: 0, stdout: `docker=28.5.1\nunattended=${w.unattended.has(guest.vmid) ? 'enabled' : 'disabled'}\nos=Ubuntu 24.04.3 LTS\n`, stderr: '' };
 	}

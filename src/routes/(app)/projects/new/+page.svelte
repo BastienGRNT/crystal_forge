@@ -37,7 +37,7 @@
 	import { slugify, isValidSlug } from '$lib/domain/slug';
 	import { devSlugFor, ENVIRONMENT_LABELS, PROD_BRANCH, validateEnvironment, type Environment } from '$lib/domain/environments';
 	import { buildFqdn } from '$lib/domain/domain-name';
-	import { assessHostRam, SIZES, type SizeKey } from '$lib/domain/sizes';
+	import { assessHostRam, ramTightMessage, SIZES, type SizeKey } from '$lib/domain/sizes';
 	import { hasEnvErrors, parseEnv } from '$lib/domain/env-file';
 	import type { GhRepo } from '$server/application/ports';
 	import type { RepoInspection } from '$server/application/use-cases/wizard';
@@ -65,7 +65,7 @@
 	let ackEnv = $state(false);
 	let dbService = $state('');
 	let submitting = $state(false);
-	let preview = $state<{ ctid: number | null; ip: string | null; freeIps: number; ram: { freeMb: number }; memTotalMb: number } | null>(null);
+	let preview = $state<{ ctid: number | null; ip: string | null; freeIps: number; ram: { freeMb: number }; memTotalMb: number; committedMb?: number } | null>(null);
 
 	async function inspect(full: string, dir: string) {
 		inspecting = true;
@@ -123,7 +123,7 @@
 			});
 	});
 
-	const ram = $derived(preview ? assessHostRam(preview.memTotalMb, preview.memTotalMb - preview.ram.freeMb, SIZES[size]) : null);
+	const ram = $derived(preview ? assessHostRam(preview.memTotalMb, preview.memTotalMb - preview.ram.freeMb, SIZES[size], preview.committedMb) : null);
 	/** RAM serrée d'après l'aperçu, ou d'après le serveur qui a relu l'hôte au moment de créer. */
 	const serverTightMb = $derived(form && 'ramTightMb' in form && typeof form.ramTightMb === 'number' ? form.ramTightMb : null);
 	const ramTight = $derived(ram?.level === 'tight' || (serverTightMb !== null && ram?.level !== 'insufficient'));
@@ -379,12 +379,12 @@
 
 		<SectionCard title="5. Conteneur" description="Clone complet du template 900 (Docker + runner) dans le pool forge." icon={Server}>
 			<div class="space-y-4">
-				<SizePicker bind:value={size} freeMb={preview?.ram.freeMb ?? null} totalMb={preview?.memTotalMb ?? null} />
+				<SizePicker bind:value={size} freeMb={preview?.ram.freeMb ?? null} totalMb={preview?.memTotalMb ?? null} committedMb={preview?.committedMb} />
 				{#if ramTight}
 					<label class="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
 						<Checkbox bind:checked={ackRam} name="acknowledgeRam" class="mt-0.5" />
 						<span>
-							<span class="font-medium text-warning">RAM serrée</span> — il ne resterait que {serverTightMb ?? Math.round(ram?.afterMb ?? 0)} Mo libres sur l'hôte. Je confirme vouloir créer ce CT.
+							<span class="font-medium text-warning">RAM serrée</span> — {serverTightMb === null && ram && preview ? ramTightMessage(ram, preview.memTotalMb, false) : `Il ne resterait que ${serverTightMb ?? Math.round(ram?.afterMb ?? 0)} Mo libres sur l'hôte.`} Je confirme vouloir créer ce CT.
 						</span>
 					</label>
 				{:else if ram?.level === 'insufficient'}

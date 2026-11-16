@@ -5,7 +5,7 @@ import { analyzeCompose, type ComposeAnalysis } from '$lib/domain/compose-analys
 import { ENV_TEMPLATE_FILES, parseEnvTemplate, type EnvTemplate } from '$lib/domain/env-template';
 import { buildFqdn, isValidSubdomain, normalizeSubdomain, servesDomain } from '$lib/domain/domain-name';
 import { errorMessage } from '$lib/domain/errors';
-import { assessHostRam, hostMemoryInUse, SIZES, type SizeKey } from '$lib/domain/sizes';
+import { assessHostRam, committedMemoryMb, hostMemoryInUse, SIZES, type SizeKey } from '$lib/domain/sizes';
 import { workflowPathFor, type Environment } from '$lib/domain/environments';
 import { findSelfHostedWorkflows, WORKFLOW_PATH, type SelfHostedUsage } from '$lib/domain/workflow';
 import { childrenOf } from '$lib/domain/repo-tree';
@@ -163,8 +163,9 @@ export class WizardService {
 			{ start: settings.get('network.ipStart'), end: settings.get('network.ipEnd') },
 			settings.list('network.reservedIps')
 		);
-		const ram = assessHostRam(node.memory.total / 1024 ** 2, hostMemoryInUse(node.memory) / 1024 ** 2, SIZES[size]);
-		return { ctid, ip: ips[0] ?? null, freeIps: ips.length, ram, memTotalMb: node.memory.total / 1024 ** 2 };
+		const committedMb = committedMemoryMb(guests);
+		const ram = assessHostRam(node.memory.total / 1024 ** 2, hostMemoryInUse(node.memory) / 1024 ** 2, SIZES[size], committedMb);
+		return { ctid, ip: ips[0] ?? null, freeIps: ips.length, ram, memTotalMb: node.memory.total / 1024 ** 2, committedMb };
 	}
 }
 

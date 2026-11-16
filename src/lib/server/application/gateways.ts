@@ -28,6 +28,7 @@ import {
 	type OwnedResource,
 	type ResourceType
 } from '$lib/domain/safety-policy';
+import { assertSafeBackupJob, assertSafeCriticalCtTune, type DesiredBackupJob } from '$lib/domain/host-maintenance';
 import { TtlCache } from './cache';
 import { DRY_PREFIX, isSimulated, type WriteGuard, type WriteOp } from './guard';
 import type {
@@ -278,6 +279,42 @@ export class ProxmoxGateway {
 			check: () => this.#assertModifiable(vmid),
 			execute: () => this.api.vzdump(vmid, storage),
 			simulate: () => `${DRY_PREFIX}:vzdump:${vmid}`
+		});
+	}
+
+	backupJobs() {
+		return this.api.backupJobs();
+	}
+
+	/** Crée ou met à jour un job de sauvegarde « forge-* » (jamais un autre, jamais de suppression). */
+	upsertBackupJob(job: DesiredBackupJob, exists: boolean): Promise<void> {
+		const { id, ...rest } = job;
+		const params: Record<string, string | number> = { ...rest } as Record<string, string | number>;
+		// Un job passe de « liste de CT » à « pool » (ou l'inverse) : vider l'autre champ.
+		if (exists) params.delete = job.pool ? 'vmid' : 'pool';
+		return this.#run({
+			system: 'proxmox',
+			action: exists ? 'backup.job.update' : 'backup.job.create',
+			summary: `${exists ? 'Mettre à jour' : 'Créer'} le job de sauvegarde ${id} : ${job.pool ? `pool ${job.pool}` : `CT ${job.vmid}`}, ${job.schedule}, ${job.storage}, ${job['prune-backups']}`,
+			check: () => assertSafeBackupJob({ ...job }, { pool: this.d.settings.get('proxmox.pool'), criticalCtids: this.d.settings.criticalCtids() }),
+			execute: () => (exists ? this.api.updateBackupJob(id, params) : this.api.createBackupJob({ id, ...params })),
+			simulate: () => undefined
+		});
+	}
+
+	/** RAM plancher / priorité CPU d'un CT critique (protégé ou Forge) : seul réglage permis hors pool. */
+	tuneCriticalCt(vmid: number, config: { memory?: number; cpuunits?: number }): Promise<void> {
+		return this.#run({
+			system: 'proxmox',
+			action: 'lxc.tune',
+			summary: `Régler le CT critique ${vmid} : ${Object.entries(config).map(([k, v]) => `${k}=${v}`).join(', ')}`,
+			check: async () => {
+				const g = (await this.api.guests()).find((x) => x.vmid === vmid);
+				if (!g) throw new SafetyViolation('tune.missing', `CT ${vmid} introuvable.`);
+				assertSafeCriticalCtTune({ vmid, criticalCtids: this.d.settings.criticalCtids(), config, currentMemoryMb: Math.round(g.maxmem / 1048576) });
+			},
+			execute: () => this.api.updateConfig(vmid, config),
+			simulate: () => undefined
 		});
 	}
 
@@ -926,6 +963,10 @@ export class ReadCommand {
 		return new ReadCommand(
 			`: forge-op=versions; echo "docker=$(docker version --format '{{.Server.Version}}' 2>/dev/null)"; echo "unattended=$(systemctl is-enabled unattended-upgrades 2>/dev/null || echo absent)"; . /etc/os-release && echo "os=$PRETTY_NAME"`
 		);
+	}
+	/** Place prise par Docker (cache de build, images) et disque du CT. */
+	static buildCache() {
+		return new ReadCommand(`: forge-op=buildcache; docker system df --format '{{.Type}}\t{{.Size}}'; df -B1 --output=used,size / | tail -n 1`);
 	}
 	/** Accès Internet du CT (NAT) : code HTTP de l'API GitHub, « 000 » si injoignable. */
 	static internet() {

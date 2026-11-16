@@ -7,6 +7,7 @@ import { dnsStep } from './steps/dns';
 import { proxyRepointStep, proxyStep } from './steps/proxy';
 import { pipelineStep } from './steps/pipeline';
 import { firewallStep } from './steps/firewall';
+import { pruneCacheStep } from './steps/build-cache';
 import { dbBackupStep, dbRestoreStep } from './steps/database';
 import { osUpdatesStep, resizeStep, upgradeWorkflowStep } from './steps/upgrade';
 import {
@@ -25,6 +26,7 @@ export const STEPS: Record<string, StepDefinition> = Object.fromEntries(
 	[
 		containerStep,
 		firewallStep,
+		pruneCacheStep,
 		dbBackupStep,
 		dbRestoreStep,
 		resizeStep,
@@ -117,6 +119,11 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
 		type: 'firewall',
 		label: 'Pare-feu du CT',
 		steps: () => ['firewall']
+	},
+	prune_cache: {
+		type: 'prune_cache',
+		label: 'Nettoyage du cache de build',
+		steps: () => ['prune_cache']
 	},
 	db_backup: {
 		type: 'db_backup',

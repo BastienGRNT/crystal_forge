@@ -105,6 +105,7 @@ const ALLOWED_CONFIG_KEYS = new Set([
 	'cores',
 	'memory',
 	'swap',
+	'cpuunits',
 	'net0',
 	'onboot',
 	'protection',

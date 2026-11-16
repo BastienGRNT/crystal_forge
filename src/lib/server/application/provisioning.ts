@@ -13,7 +13,7 @@ export const PROVISION_FILE = 'provision.json';
 export const PUBLIC_KEY_FILE = 'forge.pub';
 
 /** Réglages qu'un script de l'hôte peut fournir : rien d'autre n'est importé. */
-const PROVISIONABLE: SettingKey[] = ['proxmox.url', 'proxmox.node', 'proxmox.tokenId', 'proxmox.tokenSecret', 'proxmox.caCert', 'safety.protectedCtids'];
+const PROVISIONABLE: SettingKey[] = ['proxmox.url', 'proxmox.node', 'proxmox.tokenId', 'proxmox.tokenSecret', 'proxmox.caCert', 'safety.protectedCtids', 'safety.forgeCtid', 'proxmox.backupStorage'];
 
 async function isDir(path: string): Promise<boolean> {
 	try {

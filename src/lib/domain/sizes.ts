@@ -31,24 +31,58 @@ export function hostMemoryInUse(memory: { used: number; arc: number }): number {
 /** Marge de RAM que l'on veut garder libre sur l'hôte après création d'un CT. */
 export const HOST_RAM_SAFETY_MARGIN_MB = 1024;
 
+/**
+ * Somme des limites RAM promises aux CT : au-delà de la RAM de l'hôte, si plusieurs CT
+ * montent en même temps (builds), l'hôte swappe et TOUS les CT ralentissent. On tolère un
+ * peu de surengagement (les CT n'utilisent jamais tous leur limite), pas plus.
+ */
+export const MAX_MEMORY_COMMIT_RATIO = 1.25;
+
 export interface RamAssessment {
 	freeMb: number;
 	afterMb: number;
 	level: 'ok' | 'tight' | 'insufficient';
+	/** Limites RAM promises aux CT démarrés après l'opération (si connues). */
+	committedAfterMb?: number;
+	/** Le total des limites dépasserait MAX_MEMORY_COMMIT_RATIO × RAM de l'hôte. */
+	overcommitted?: boolean;
+}
+
+/** Somme des limites RAM (Mo) des CT démarrés, hors templates. */
+export function committedMemoryMb(guests: { status: string; template: boolean; maxmem: number }[]): number {
+	return guests.filter((g) => g.status === 'running' && !g.template).reduce((sum, g) => sum + g.maxmem, 0) / 1024 ** 2;
 }
 
 /**
- * Évalue l'impact d'un nouveau CT sur la RAM de l'hôte.
- * - insufficient : la RAM libre ne couvre même pas la RAM du CT
- * - tight : il resterait moins que la marge de sécurité
+ * Évalue l'impact d'un nouveau CT (ou de RAM en plus) sur l'hôte.
+ * - insufficient : la RAM libre ne couvre même pas la RAM demandée
+ * - tight : il resterait moins que la marge de sécurité, ou (si `committedMb` est fourni)
+ *   les limites promises aux CT dépasseraient MAX_MEMORY_COMMIT_RATIO × la RAM de l'hôte
  */
-export function assessHostRam(totalMb: number, usedMb: number, size: ContainerSize): RamAssessment {
+export function assessHostRam(totalMb: number, usedMb: number, size: ContainerSize, committedMb?: number): RamAssessment {
 	const freeMb = Math.max(0, totalMb - usedMb);
 	const afterMb = freeMb - size.memoryMb;
 	let level: RamAssessment['level'] = 'ok';
 	if (afterMb < 0) level = 'insufficient';
 	else if (afterMb < HOST_RAM_SAFETY_MARGIN_MB) level = 'tight';
-	return { freeMb, afterMb, level };
+	if (committedMb === undefined) return { freeMb, afterMb, level };
+	const committedAfterMb = committedMb + size.memoryMb;
+	const overcommitted = committedAfterMb > totalMb * MAX_MEMORY_COMMIT_RATIO;
+	if (overcommitted && level === 'ok') level = 'tight';
+	return { freeMb, afterMb, level, committedAfterMb, overcommitted };
+}
+
+/** Message de confirmation d'un cas « tight ». */
+export function ramTightMessage(ram: RamAssessment, totalMb: number, hint = true): string {
+	const parts: string[] = [];
+	if (ram.afterMb < HOST_RAM_SAFETY_MARGIN_MB) parts.push(`il ne resterait que ${Math.round(ram.afterMb)} Mo de RAM libre sur l'hôte`);
+	if (ram.overcommitted && ram.committedAfterMb !== undefined) {
+		parts.push(
+			`les CT démarrés se verraient promettre ${(ram.committedAfterMb / 1024).toFixed(1)} Go pour ${(totalMb / 1024).toFixed(1)} Go de RAM (${Math.round((ram.committedAfterMb / totalMb) * 100)} %) : si plusieurs builds tournent ensemble, l'hôte swappe et tous les sites ralentissent`
+		);
+	}
+	const text = parts.join(' ; ');
+	return `${text.charAt(0).toUpperCase()}${text.slice(1)}.${hint ? ' Cochez la confirmation pour continuer.' : ''}`;
 }
 
 /** Bornes d'une taille personnalisée (l'hôte a 8 cœurs et ~15 Go). */

@@ -34,6 +34,7 @@ export function seedMockDatabase(s: ForgeServices, db: Db): void {
 		'proxmox.node': 'ns3125740',
 		'github.owner': 'BastienGRNT',
 		'safety.protectedCtids': '100,101,401,402,403,404',
+		'safety.forgeCtid': '150',
 		'network.reservedIps': '10.10.10.1,10.10.10.2,10.10.10.15,10.10.10.50,10.10.10.200'
 	} as const;
 	settings.set(Object.fromEntries(Object.entries(demoSettings).filter(([k]) => !settings.has(k as keyof typeof demoSettings))));

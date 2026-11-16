@@ -5,7 +5,7 @@ import { errorMessage, RamTightError, SafetyViolation, UserFacingError } from '$
 import { hasEnvErrors, maskValue, parseEnv } from '$lib/domain/env-file';
 import { isIpv4 } from '$lib/domain/network';
 import { assertSafeCommand } from '$lib/domain/safety-policy';
-import { assessHostRam, hostMemoryInUse, isSizeKey, SIZES, validateResize, type SizeKey } from '$lib/domain/sizes';
+import { assessHostRam, committedMemoryMb, hostMemoryInUse, isSizeKey, ramTightMessage, SIZES, validateResize, type SizeKey } from '$lib/domain/sizes';
 import { isValidSlug, RESERVED_SLUGS, slugify } from '$lib/domain/slug';
 import { GENERATED_COMPOSE_FILE } from '$lib/domain/workflow';
 import { PROD_BRANCH, validateEnvironment, workflowFileFor, type Environment } from '$lib/domain/environments';
@@ -148,13 +148,14 @@ export class ProjectService {
 			if (h) throw new UserFacingError(`Un proxy host NPM existe déjà pour ${d.fqdn} (→ ${h.forwardHost}:${h.forwardPort}). Rien n'est écrasé.`);
 		}
 
-		const node = await proxmox.nodeStatus();
-		const ram = assessHostRam(node.memory.total / 1024 ** 2, hostMemoryInUse(node.memory) / 1024 ** 2, SIZES[size]);
+		const [node, guests] = await Promise.all([proxmox.nodeStatus(), proxmox.guests()]);
+		const totalMb = node.memory.total / 1024 ** 2;
+		const ram = assessHostRam(totalMb, hostMemoryInUse(node.memory) / 1024 ** 2, SIZES[size], committedMemoryMb(guests));
 		if (ram.level === 'insufficient') {
 			throw new UserFacingError(`RAM insuffisante sur l'hôte : ${Math.round(ram.freeMb)} Mo libres pour un CT de ${SIZES[size].memoryMb} Mo.`);
 		}
 		if (ram.level === 'tight' && !input.acknowledgeRam) {
-			throw new RamTightError(`Il ne resterait que ${Math.round(ram.afterMb)} Mo de RAM libre sur l'hôte : cochez la confirmation pour continuer.`, ram.afterMb);
+			throw new RamTightError(ramTightMessage(ram, totalMb), ram.afterMb);
 		}
 
 		// Base de données : seulement un service réel du compose, d'un type pris en charge.
@@ -380,11 +381,14 @@ export class ProjectService {
 		const check = validateResize(sizeOf(p), target, currentDiskGb);
 		if (check.errors.length) throw new UserFacingError(check.errors.join('\n'));
 		if (check.extraMemoryMb > 0) {
-			const node = await this.s.proxmox.nodeStatus();
-			const ram = assessHostRam(node.memory.total / 1024 ** 2, hostMemoryInUse(node.memory) / 1024 ** 2, { ...SIZES.S, memoryMb: check.extraMemoryMb });
+			const [node, guests] = await Promise.all([this.s.proxmox.nodeStatus(), this.s.proxmox.guests()]);
+			const totalMb = node.memory.total / 1024 ** 2;
+			// Un CT arrêté ne compte pas encore : sa nouvelle limite s'ajoutera à son démarrage.
+			const running = guests.some((g) => g.vmid === p.ctid && g.status === 'running');
+			const ram = assessHostRam(totalMb, hostMemoryInUse(node.memory) / 1024 ** 2, { ...SIZES.S, memoryMb: check.extraMemoryMb }, running ? committedMemoryMb(guests) : undefined);
 			if (ram.level === 'insufficient') throw new UserFacingError(`RAM insuffisante sur l'hôte : ${Math.round(ram.freeMb)} Mo libres pour ${check.extraMemoryMb} Mo de plus.`);
 			if (ram.level === 'tight' && !acknowledgeRam) {
-				throw new RamTightError(`Il ne resterait que ${Math.round(ram.afterMb)} Mo de RAM libre sur l'hôte : cochez la confirmation pour continuer.`, ram.afterMb);
+				throw new RamTightError(ramTightMessage(ram, totalMb), ram.afterMb);
 			}
 		}
 		const preset = SIZES[target.preset];

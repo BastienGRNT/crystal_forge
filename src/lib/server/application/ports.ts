@@ -89,6 +89,8 @@ export interface PveBackupJob {
 	schedule: string;
 	vmid: string | null;
 	all: boolean;
+	/** Sélection par pool : tous les CT du pool, présents et futurs. */
+	pool: string | null;
 	storage: string | null;
 }
 
@@ -117,6 +119,10 @@ export interface ProxmoxApi {
 	power(vmid: number, action: PowerAction): Promise<string>;
 	destroy(vmid: number): Promise<string>;
 	vzdump(vmid: number, storage: string): Promise<string>;
+	/** POST /cluster/backup (Sys.Modify sur « / » + Datastore.Allocate sur le stockage). */
+	createBackupJob(params: Record<string, string | number>): Promise<void>;
+	/** PUT /cluster/backup/{id}. */
+	updateBackupJob(id: string, params: Record<string, string | number>): Promise<void>;
 	setCtFirewallOptions(vmid: number, options: Record<string, string | number>): Promise<void>;
 	addCtFirewallRule(vmid: number, rule: Record<string, string | number>): Promise<void>;
 	deleteCtFirewallRule(vmid: number, pos: number): Promise<void>;
