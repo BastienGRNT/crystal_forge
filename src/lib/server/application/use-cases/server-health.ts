@@ -9,6 +9,7 @@ import { BUILD_CACHE_AUTO_PRUNE_BYTES, formatBytes, parseBuildCacheUsage } from 
 import type { ProjectRow } from '$server/infrastructure/db/schema';
 import { hasFirewallFlag, INTERNET_PROBE_URL, parseInternetProbe } from '$lib/domain/firewall';
 import { inCidr } from '$lib/domain/network';
+import type { OffsiteBackupService } from './offsite';
 import { backupJobChanges, CPU_WEIGHTS, criticalCtPlan, desiredBackupJobs, FORGE_BACKUP_STORAGE } from '$lib/domain/host-maintenance';
 import { ReadCommand } from '../gateways';
 import { CONNTRACK_FIX } from '../jobs/steps/common';
@@ -48,7 +49,37 @@ async function safe(fn: () => Promise<HealthCheck | HealthCheck[]>, fallback: Om
 }
 
 export class ServerHealthService {
-	constructor(private readonly s: ForgeServices) {}
+	constructor(
+		private readonly s: ForgeServices,
+		private readonly offsite?: Pick<OffsiteBackupService, 'configured' | 'state'>
+	) {}
+
+	/** Sauvegardes hors serveur : configurées, récentes, testées. */
+	#offsiteChecks(): HealthCheck[] {
+		const base = { group: 'Sauvegardes' };
+		const fix = 'Réglages → Sauvegardes R2 (bucket + clé), puis « Sauvegarder maintenant ».';
+		if (!this.offsite?.configured()) {
+			return [{ ...base, id: 'offsite', label: 'Copie hors serveur (R2)', status: 'warn', detail: 'Non configurée : si le disque du serveur meurt, la base de Forge et celles des projets sont perdues.', fix }];
+		}
+		const st = this.offsite.state();
+		const age = (at?: number) => (at ? Math.round((Date.now() - at) / 3600_000) : null);
+		const out: HealthCheck[] = [];
+		const forge = st.forge;
+		out.push(
+			!forge || !forge.ok || (age(forge.at) ?? 99) > 3
+				? { ...base, id: 'offsite', label: 'Copie hors serveur (R2)', status: forge && !forge.ok ? 'error' : 'warn', detail: forge?.error ? `Dernier essai en échec : ${forge.error}` : 'Base de Forge pas copiée depuis plus de 3 h.', fix }
+				: { ...base, id: 'offsite', label: 'Copie hors serveur (R2)', status: 'ok', detail: `Base de Forge copiée il y a ${age(forge.at)} h${forge.simulated ? ' (DRY_RUN : rien envoyé)' : ''} ; bases des projets : ${st.projects ? (st.projects.ok ? `il y a ${age(st.projects.at)} h` : st.projects.error) : 'pas encore'}.` }
+		);
+		const rt = st.restoreTest;
+		out.push(
+			!rt
+				? { ...base, id: 'offsite-test', label: 'Test de restauration', status: 'warn', detail: 'Pas encore fait (automatique, après la première copie).' }
+				: rt.ok && (age(rt.at) ?? 9999) < 24 * 35
+					? { ...base, id: 'offsite-test', label: 'Test de restauration', status: 'ok', detail: `Réussi le ${new Date(rt.at).toLocaleDateString('fr-FR')} : les copies se relisent.` }
+					: { ...base, id: 'offsite-test', label: 'Test de restauration', status: 'error', detail: rt.ok ? 'Plus vieux que 35 jours.' : `Échec : ${rt.error}`, fix }
+		);
+		return out;
+	}
 
 	async run(clientIp: string | null): Promise<{ checks: HealthCheck[]; checkedAt: number }> {
 		const { proxmox, settings, repos } = this.s;
@@ -426,6 +457,7 @@ export class ServerHealthService {
 				},
 				{ id: 'backup-projects', group: 'Sauvegardes', label: 'Sauvegarde quotidienne des projets' }
 			),
+			safe(async () => this.#offsiteChecks(), { id: 'offsite', group: 'Sauvegardes', label: 'Copie hors serveur (R2)' }),
 			safe(
 				async () => {
 					const out: HealthCheck[] = [];

@@ -382,7 +382,23 @@ export interface ResolverApi {
 	resolveA(name: string): Promise<string[]>;
 }
 
+/** Dépôt de sauvegardes hors serveur (restic sur R2/S3). Chemins et ID déjà validés. */
+export interface OffsiteApi {
+	/** Le dépôt existe-t-il (restic cat config) ? */
+	initialized(): Promise<boolean>;
+	init(): Promise<void>;
+	/** Sauvegarde un contenu sous `path` (fichier unique), avec des étiquettes. */
+	backup(path: string, data: Buffer, tags: string[]): Promise<void>;
+	/** JSON brut de `restic snapshots --json`. */
+	snapshotsJson(): Promise<string>;
+	/** Contenu d'un fichier d'un instantané. */
+	dump(snapshotId: string, path: string, maxBytes: number): Promise<Buffer>;
+	/** Rétention (forget --prune). */
+	forget(args: string[]): Promise<void>;
+}
+
 export interface ExternalApis {
+	offsite: OffsiteApi;
 	proxmox: ProxmoxApi;
 	github: GithubApi;
 	ovh: OvhApi;

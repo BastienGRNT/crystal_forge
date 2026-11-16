@@ -29,6 +29,7 @@ import {
 	type ResourceType
 } from '$lib/domain/safety-policy';
 import { assertSafeBackupJob, assertSafeCriticalCtTune, type DesiredBackupJob } from '$lib/domain/host-maintenance';
+import { OFFSITE_RETENTION, assertOffsitePath, assertSnapshotId, parseSnapshots, resticRepository, retentionArgs, type OffsiteSnapshot } from '$lib/domain/offsite';
 import { TtlCache } from './cache';
 import { DRY_PREFIX, isSimulated, type WriteGuard, type WriteOp } from './guard';
 import type {
@@ -1002,7 +1003,7 @@ function assertLocation(l: DbLocation) {
  */
 export class DbCommand {
 	private constructor(
-		readonly op: 'query' | 'backup' | 'restore' | 'list' | 'download' | 'inspect' | 'import',
+		readonly op: 'query' | 'backup' | 'restore' | 'list' | 'download' | 'inspect' | 'import' | 'export',
 		readonly readOnly: boolean,
 		private readonly cmd: string
 	) {}
@@ -1059,6 +1060,15 @@ export class DbCommand {
 		);
 	}
 
+	/**
+	 * Dump gzip de la base vers la sortie (taille, puis base64), sans rien laisser sur le CT :
+	 * lecture seule pour les données (pg_dump / mysqldump). Sert aux sauvegardes hors serveur.
+	 */
+	static exportDump(l: DbLocation, maxBytes: number) {
+		const body = `T=$(mktemp) && trap 'rm -f "$T"' EXIT && ${DbCommand.#exec(l, dumpScript(l.kind))} | gzip > "$T" && S=$(stat -c %s "$T") && echo "$S" && if [ "$S" -le ${maxBytes} ]; then base64 -w0 "$T"; fi`;
+		return new DbCommand('export', true, `: forge-db=export; set -o pipefail; ${body}`);
+	}
+
 	static listBackups(l: Pick<DbLocation, 'slug'>) {
 		assertSlug(l.slug);
 		return new DbCommand('list', true, `: forge-db=list; find ${shq(DbCommand.#dir(l))} -maxdepth 1 -name '*.sql.gz' -printf '%f\t%s\t%T@\n' 2>/dev/null || true`);
@@ -1079,5 +1089,66 @@ export class DbCommand {
 			true,
 			`: forge-db=inspect; cd ${shq(`${l.repoDir}/${l.workdir}`)} && docker compose -f ${shq(l.composeFile)} ps -q ${shq(l.service)} | xargs -r docker inspect -f '{{.State.Status}} {{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}'`
 		);
+	}
+}
+
+// =================================================================================
+// Sauvegardes hors serveur (restic → R2)
+// =================================================================================
+
+export class OffsiteGateway {
+	constructor(private readonly d: Deps) {}
+
+	get #api() {
+		return this.d.apis().offsite;
+	}
+
+	initialized(): Promise<boolean> {
+		return this.#api.initialized();
+	}
+
+	/** Crée le dépôt chiffré s'il n'existe pas encore. */
+	async ensureRepository(): Promise<void> {
+		if (await this.#api.initialized()) return;
+		await this.d.guard.run({
+			system: 'r2',
+			action: 'init',
+			summary: `Créer le dépôt de sauvegardes chiffré dans le bucket « ${this.d.settings.get('offsite.bucket')} »`,
+			check: () => void resticRepository({ endpoint: this.d.settings.get('offsite.endpoint'), bucket: this.d.settings.get('offsite.bucket') }),
+			execute: () => this.#api.init(),
+			simulate: () => undefined
+		});
+	}
+
+	backup(path: string, data: Buffer, tags: string[]): Promise<void> {
+		return this.d.guard.run({
+			system: 'r2',
+			action: 'backup',
+			summary: `Envoyer ${path.slice(1)} (${Math.max(1, Math.round(data.length / 1024))} Ko, chiffré)`,
+			check: () => assertOffsitePath(path),
+			execute: () => this.#api.backup(path, data, tags),
+			simulate: () => undefined
+		});
+	}
+
+	async snapshots(): Promise<OffsiteSnapshot[]> {
+		return parseSnapshots(await this.#api.snapshotsJson());
+	}
+
+	/** Lecture : autorisée en DRY_RUN. */
+	dump(snapshotId: string, path: string, maxBytes: number): Promise<Buffer> {
+		assertSnapshotId(snapshotId);
+		assertOffsitePath(path);
+		return this.#api.dump(snapshotId, path, maxBytes);
+	}
+
+	prune(): Promise<void> {
+		return this.d.guard.run({
+			system: 'r2',
+			action: 'forget',
+			summary: `Rétention hors serveur : ${OFFSITE_RETENTION.daily} jours, ${OFFSITE_RETENTION.weekly} semaines, ${OFFSITE_RETENTION.monthly} mois`,
+			execute: () => this.#api.forget(retentionArgs()),
+			simulate: () => undefined
+		});
 	}
 }

@@ -71,6 +71,16 @@ export const SETTING_DEFS = {
 	'forge.updateBranch': { default: 'main' },
 	/** Correspondance CT hors Forge → dépôt GitHub (JSON { "402": "BastienGRNT/crystal_wallet" }). */
 	'dashboard.repoMap': { default: '{}' },
+	/**
+	 * Sauvegardes hors serveur (Cloudflare R2). Le chiffrement utilise une clé dérivée de
+	 * la clé maître de Forge : rien d'autre à conserver que cette clé maître.
+	 */
+	'offsite.endpoint': { default: '' },
+	'offsite.bucket': { default: '' },
+	'offsite.accessKeyId': { default: '' },
+	'offsite.secretAccessKey': { default: '', secret: true },
+	/** État interne (JSON) : dernières réussites/échecs. Écrit par Forge. */
+	'offsite.state': { default: '{}' },
 	/** Surcharge du DRY_RUN — uniquement en mode mock. */
 	'runtime.dryRun': { default: '' }
 } as const satisfies Record<string, Def>;

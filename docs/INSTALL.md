@@ -387,6 +387,41 @@ Ensuite, **Réglages → Mise à jour** :
 3. `DRY_RUN=false` dans `.env`, puis `docker compose up -d`.
 4. Premier vrai déploiement sur un dépôt jetable et un sous-domaine de test.
 
+## 6 bis. Sauvegardes hors serveur (Cloudflare R2)
+
+Les sauvegardes Proxmox restent sur le serveur : s'il brûle, elles partent avec. Forge envoie donc lui-même une copie **chiffrée** (restic) vers Cloudflare R2 :
+
+- base de Forge : toutes les heures ;
+- bases SQL des projets : une fois par jour ;
+- rétention : 7 jours, 4 semaines, 6 mois ; test de restauration automatique tous les 30 jours (visible dans Santé du serveur).
+
+Les volumes Docker (fichiers envoyés par les utilisateurs, etc.) ne sont **pas** encore copiés hors serveur : seulement les bases.
+
+**Seule étape manuelle** (Cloudflare n'a pas d'API pour créer la première clé) :
+
+1. Cloudflare → R2 → *Create bucket*, par exemple `forge-backups`.
+2. R2 → *Manage API tokens* → *Create API token* : permission **Object Read & Write**, limitée à ce bucket. (restic doit pouvoir supprimer les vieilles copies : « lecture seule » ne marche pas.)
+3. Forge → Réglages → **Sauvegardes R2** : collez l'adresse S3 (`https://<compte>.r2.cloudflarestorage.com`), le nom du bucket, l'*Access Key ID* et le *Secret Access Key*, puis « Sauvegarder maintenant ».
+
+Le mot de passe du dépôt restic est **dérivé de `FORGE_MASTER_KEY`** : gardez cette clé hors du serveur (gestionnaire de mots de passe). Sans elle, les copies sont illisibles.
+
+Une copie de base de projet se rapatrie depuis le projet → Base de données → « Copies hors serveur (R2) » → *Rapatrier*, puis se restaure comme une sauvegarde normale.
+
+### Si le serveur est perdu : récupérer la base de Forge
+
+Sur la nouvelle machine, avec restic installé (`apt install restic`) et la même `FORGE_MASTER_KEY` :
+
+```bash
+export FORGE_MASTER_KEY='…'   # celle de l'ancien .env
+export RESTIC_PASSWORD=$(node -e 'const k=process.env.FORGE_MASTER_KEY.trim();const b=/^[0-9a-fA-F]{64}$/.test(k)?Buffer.from(k,"hex"):Buffer.from(k,"base64");console.log(require("crypto").createHmac("sha256",b).update("forge-offsite-restic-v1").digest("base64url"))')
+export RESTIC_REPOSITORY='s3:https://<compte>.r2.cloudflarestorage.com/<bucket>/forge'
+export AWS_ACCESS_KEY_ID='…' AWS_SECRET_ACCESS_KEY='…' AWS_DEFAULT_REGION=auto
+restic snapshots --tag forge                 # liste des copies
+restic dump --path /forge.db latest /forge.db > forge.db      # dernière base de Forge
+```
+
+Placez `forge.db` dans le volume `/data` du nouveau Forge (avec le même `.env`) avant le premier démarrage. Les dumps de projets se lisent de la même façon : `restic dump --path /project-<slug>.sql.gz latest /project-<slug>.sql.gz > dump.sql.gz`.
+
 ## 7. Variables, migrations et bases de données
 
 - **`.env.example`** : l'assistant lit `.env.example`, `.env.sample` ou `.env.template` (dans le sous-dossier choisi, sinon à la racine). Il pré-remplit le .env :

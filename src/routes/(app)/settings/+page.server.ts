@@ -5,6 +5,7 @@ import { isSettingKey, type SettingKey } from '$server/application/settings';
 import { generateForgeKeyPair, publicKeyFingerprint } from '$server/infrastructure/clients/ssh';
 import { ovhCreateTokenUrl } from '$server/infrastructure/clients/ovh-signature';
 import { isIpv4 } from '$lib/domain/network';
+import { resticRepository } from '$lib/domain/offsite';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async () => {
@@ -25,6 +26,8 @@ export const load: PageServerLoad = async () => {
 		ovhTokenUrlNoDelete: ovhCreateTokenUrl(f.settings.get('ovh.endpoint'), zoneList, false),
 		audit: f.guard.recentAudit(30),
 		accounts: f.accounts.list(),
+		offsite: f.offsite.state(),
+		offsiteConfigured: f.offsite.configured(),
 		update: await f.selfUpdate.status().catch((err) => ({ error: errorMessage(err) }))
 	};
 };
@@ -46,7 +49,14 @@ function validate(values: Partial<Record<SettingKey, string>>) {
 		}
 	}
 	if (values['ssh.privateKey'] !== undefined) throw new UserFacingError('La clé SSH se génère avec le bouton dédié.');
-	if (values['runtime.dryRun'] !== undefined) throw new UserFacingError('Réglage interne.');
+	if (values['runtime.dryRun'] !== undefined || values['offsite.state'] !== undefined) throw new UserFacingError('Réglage interne.');
+	if (values['offsite.endpoint'] || values['offsite.bucket']) {
+		try {
+			resticRepository({ endpoint: values['offsite.endpoint'] ?? '', bucket: values['offsite.bucket'] ?? '' });
+		} catch (err) {
+			throw new UserFacingError(errorMessage(err));
+		}
+	}
 }
 
 export const actions: Actions = {
@@ -93,6 +103,13 @@ export const actions: Actions = {
 			return fail(400, { section: String(d.get('_section') ?? ''), error: errorMessage(err) });
 		}
 		return { section: String(d.get('_section') ?? ''), saved: true };
+	},
+	offsiteRun: async () => {
+		try {
+			return { section: 'offsite', done: await forge().offsite.tick(true) };
+		} catch (err) {
+			return fail(400, { section: 'offsite', error: errorMessage(err) });
+		}
 	},
 	test: async () => {
 		return { report: await forge().connections.run() };

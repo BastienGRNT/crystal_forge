@@ -15,7 +15,7 @@ import { ServerHealthService } from './application/use-cases/server-health';
 import { UpgradeService } from './application/use-cases/upgrade';
 import { SelfUpdateService } from './application/use-cases/self-update';
 import { EventBus } from './application/events';
-import { DnsGateway, GithubGateway, ProxmoxGateway, ProxyGateway, ShellGateway } from './application/gateways';
+import { DnsGateway, GithubGateway, OffsiteGateway, ProxmoxGateway, ProxyGateway, ShellGateway } from './application/gateways';
 import { WriteGuard } from './application/guard';
 import { JobEngine } from './application/jobs/engine';
 import type { ExternalApis } from './application/ports';
@@ -37,8 +37,22 @@ import { createFakeApis } from './infrastructure/mock/fake-apis';
 import { seedMockDatabase } from './infrastructure/mock/seed';
 import { resetWorld } from './infrastructure/mock/world';
 import { exportPublicKey, importProvisioning } from './application/provisioning';
+import { OffsiteBackupService } from './application/use-cases/offsite';
+import { ResticClient } from './infrastructure/clients/restic';
+import { createHmac } from 'node:crypto';
+import { readFile, rm } from 'node:fs/promises';
+import { rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
+
+/** Mot de passe du dépôt restic, dérivé de la clé maître : la garder suffit pour tout relire. */
+export function offsitePassword(masterKey: Buffer): string {
+	return createHmac('sha256', masterKey).update('forge-offsite-restic-v1').digest('base64url');
+}
 
 export interface Forge extends ForgeServices {
+	offsite: OffsiteBackupService;
 	engine: JobEngine;
 	auth: AuthService;
 	audit: AuditRepo;
@@ -62,7 +76,7 @@ export interface Forge extends ForgeServices {
  * l'empreinte de sa configuration : un changement (URL, jeton, CA…) en reconstruit un
  * neuf, avec son propre dispatcher TLS — jamais l'ancien.
  */
-function liveApis(settings: SettingsService, accounts: AccountService): () => ExternalApis {
+function liveApis(settings: SettingsService, accounts: AccountService, masterKey: Buffer): () => ExternalApis {
 	let cache: Partial<Record<keyof ExternalApis, { sig: string; client: object }>> = {};
 	settings.onChange(() => {
 		cache = {};
@@ -97,6 +111,17 @@ function liveApis(settings: SettingsService, accounts: AccountService): () => Ex
 		return c as C;
 	};
 	const apis: ExternalApis = {
+		offsite: lazy(
+			'offsite',
+			() => ({
+				endpoint: settings.get('offsite.endpoint'),
+				bucket: settings.get('offsite.bucket'),
+				accessKeyId: settings.get('offsite.accessKeyId'),
+				secretAccessKey: settings.get('offsite.secretAccessKey'),
+				password: offsitePassword(masterKey)
+			}),
+			(c) => new ResticClient(c)
+		),
 		proxmox: lazy(
 			'proxmox',
 			() => ({
@@ -155,7 +180,7 @@ function liveApis(settings: SettingsService, accounts: AccountService): () => Ex
 
 function build(): Forge {
 	const config = getConfig();
-	const { db } = openDatabase(config.databasePath);
+	const { db, sqlite } = openDatabase(config.databasePath);
 	const cipher = new SecretBox(config.masterKey);
 
 	const projects = new ProjectRepo(db);
@@ -182,7 +207,7 @@ function build(): Forge {
 
 	accounts.onChange(refreshSecrets);
 	const fake = config.mode === 'mock' ? createFakeApis() : null;
-	const apis = fake ? () => fake : liveApis(settings, accounts);
+	const apis = fake ? () => fake : liveApis(settings, accounts, config.masterKey);
 
 	const lookup = {
 		forgeIps: () =>
@@ -280,6 +305,37 @@ function build(): Forge {
 			);
 	}
 
+	const offsite = new OffsiteBackupService(services, {
+		gateway: new OffsiteGateway(deps),
+		snapshotForgeDb: async () => {
+			const tmp = join(tmpdir(), `forge-snap-${process.pid}-${Date.now()}.db`);
+			try {
+				await sqlite.backup(tmp);
+				return await readFile(tmp);
+			} finally {
+				await rm(tmp, { force: true });
+			}
+		},
+		verifyForgeDb: (data) => {
+			const tmp = join(tmpdir(), `forge-verify-${process.pid}-${Date.now()}.db`);
+			try {
+				writeFileSync(tmp, data, { mode: 0o600 });
+				const check = new Database(tmp, { readonly: true });
+				try {
+					const r = check.pragma('integrity_check', { simple: true });
+					const tables = check.prepare("select count(*) as n from sqlite_master where type = 'table'").get() as { n: number };
+					return r !== 'ok' ? String(r) : tables.n === 0 ? 'aucune table' : null;
+				} finally {
+					check.close();
+				}
+			} catch (err) {
+				return err instanceof Error ? err.message : String(err);
+			} finally {
+				rmSync(tmp, { force: true });
+			}
+		}
+	});
+
 	const forge: Forge = {
 		...services,
 		engine,
@@ -292,7 +348,8 @@ function build(): Forge {
 		connections: new ConnectionTester(services),
 		jobs: new JobQueries(services),
 		database: new DatabaseService(services, engine),
-		health: new ServerHealthService(services),
+		offsite,
+		health: new ServerHealthService(services, offsite),
 		upgrade: new UpgradeService(services, engine),
 		selfUpdate: new SelfUpdateService(services, engine),
 		isDryRun,
@@ -327,6 +384,14 @@ function build(): Forge {
 			.catch((err) => console.warn(`[forge] Entretien : ${err instanceof Error ? err.message : err}`));
 	setTimeout(maintain, 2 * 60_000).unref();
 	setInterval(maintain, 6 * 3600_000).unref();
+	// Sauvegardes hors serveur (R2) : vérifié toutes les heures, ne fait que ce qui est dû.
+	const offsiteTick = () =>
+		void forge.offsite
+			.tick()
+			.then((done) => done.length && console.log(`[forge] Sauvegarde hors serveur : ${done.join(', ')}`))
+			.catch((err) => console.warn(`[forge] Sauvegarde hors serveur : ${err instanceof Error ? err.message : err}`));
+	setTimeout(offsiteTick, 3 * 60_000).unref();
+	setInterval(offsiteTick, 3600_000).unref();
 	console.log(`[forge] Démarré en mode ${config.mode.toUpperCase()} — DRY_RUN ${isDryRun() ? 'ACTIVÉ' : 'désactivé'} — base ${config.databasePath}`);
 	if (config.masterKeyIsDevFallback) console.warn('[forge] ⚠ FORGE_MASTER_KEY absente : clé de démonstration utilisée (mode mock uniquement).');
 	return forge;

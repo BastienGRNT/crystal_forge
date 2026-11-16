@@ -14,6 +14,7 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Plug from '@lucide/svelte/icons/plug';
 	import Upload from '@lucide/svelte/icons/upload';
+	import CloudDownload from '@lucide/svelte/icons/cloud-download';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import SectionCard from '$lib/components/molecules/section-card.svelte';
 	import KeyValue from '$lib/components/molecules/key-value.svelte';
@@ -40,6 +41,9 @@
 	const infoD = deferred(() => data.info ?? Promise.resolve(null));
 	const tablesD = deferred(() => data.tables ?? Promise.resolve(null));
 	const backupsD = deferred(() => data.backups ?? Promise.resolve(null));
+	const offsiteD = deferred(() => data.offsite ?? Promise.resolve(null));
+	const offsiteR = $derived(offsiteD.value);
+	let fetching = $state<string | null>(null);
 	const infoR = $derived(infoD.value);
 	const tablesR = $derived(tablesD.value);
 	const backupsR = $derived(backupsD.value);
@@ -372,6 +376,52 @@
 						</li>
 					{:else}
 						<li class="px-4 py-8 text-center text-sm text-muted-foreground">Aucune sauvegarde pour l'instant.</li>
+					{/each}
+				</ul>
+			{/if}
+		</SectionCard>
+		<!-- Copies hors serveur -->
+		<SectionCard
+			title="Copies hors serveur (R2)"
+			description="Chiffrées, une par jour (7 jours, 4 semaines, 6 mois). « Rapatrier » ajoute la copie à la liste ci-dessus ; vous la restaurez ensuite."
+			icon={CloudDownload}
+			bodyClass="p-0"
+		>
+			{#if !data.offsiteConfigured}
+				<p class="p-4 text-sm text-muted-foreground">Pas encore activé : <a class="underline" href="/settings?tab=offsite">Réglages → Sauvegardes R2</a>.</p>
+			{:else if offsiteR?.error}
+				<p class="p-4 text-sm text-danger">{offsiteR.error}</p>
+			{:else if !offsiteR}
+				<p class="flex items-center gap-2 p-4 text-sm text-muted-foreground"><Spinner /> Copies R2…</p>
+			{:else}
+				{#if form && 'fetched' in form && form.fetched}
+					<p class="border-b bg-success/5 px-4 py-2 text-sm text-success">
+						{form.fetched.simulated ? '[DRY-RUN] Rapatriement simulé' : `Rapatriée : ${form.fetched.name}`} — restaurez-la avec <RotateCcw class="inline size-3.5" /> dans « Sauvegardes SQL ».
+					</p>
+				{/if}
+				<ul class="divide-y text-sm">
+					{#each offsiteR.value ?? [] as s (s.id)}
+						<li class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
+							<span class="min-w-0 flex-1 truncate font-mono text-[13px]">{s.id}</span>
+							<span class="w-16 text-right text-xs text-muted-foreground tabular-nums">{s.size != null ? bytes(s.size) : ''}</span>
+							<span class="w-28 text-xs text-muted-foreground"><RelativeTime value={s.time} /></span>
+							<form
+								method="POST"
+								action="?/offsiteFetch"
+								use:enhance={() => {
+									fetching = s.id;
+									return async ({ update }) => {
+										await update();
+										fetching = null;
+									};
+								}}
+							>
+								<input type="hidden" name="snapshot" value={s.id} />
+								<Button type="submit" size="sm" variant="ghost" disabled={!!fetching || !!data.activeJob}>{#if fetching === s.id}<Spinner />{:else}<CloudDownload />{/if} Rapatrier</Button>
+							</form>
+						</li>
+					{:else}
+						<li class="px-4 py-8 text-center text-sm text-muted-foreground">Aucune copie pour l'instant (la première part dans l'heure qui suit l'activation).</li>
 					{/each}
 				</ul>
 			{/if}

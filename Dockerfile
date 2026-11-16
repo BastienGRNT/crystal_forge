@@ -16,7 +16,7 @@ RUN pnpm build && pnpm prune --prod
 FROM node:24-bookworm-slim AS runtime
 WORKDIR /app
 # ping (contrôle des IP libres) et tini (signaux propres).
-RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping tini ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends iputils-ping tini ca-certificates restic && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production \
 	PORT=3000 \
 	HOST=0.0.0.0 \

@@ -17,6 +17,7 @@ import type {
 	NpmApi,
 	NpmCreateProxyHost,
 	NpmProxyHost,
+	OffsiteApi,
 	OvhApi,
 	PowerAction,
 	ProbeApi,
@@ -1241,8 +1242,34 @@ class FakeResolver implements ResolverApi {
 	}
 }
 
+/** Dépôt restic simulé, en mémoire. */
+class FakeOffsite implements OffsiteApi {
+	#init = false;
+	#snaps: { id: string; time: string; path: string; tags: string[]; data: Buffer }[] = [];
+	async initialized() {
+		return this.#init;
+	}
+	async init() {
+		this.#init = true;
+	}
+	async backup(path: string, data: Buffer, tags: string[]) {
+		if (!this.#init) throw new Error('restic backup : dépôt absent');
+		this.#snaps.push({ id: randomBytes(4).toString('hex'), time: new Date().toISOString(), path, tags, data });
+	}
+	async snapshotsJson() {
+		return JSON.stringify(this.#snaps.map((s) => ({ short_id: s.id, time: s.time, paths: [s.path], tags: s.tags })));
+	}
+	async dump(id: string, path: string) {
+		const s = this.#snaps.find((x) => x.id === id && x.path === path);
+		if (!s) throw new Error('restic dump : introuvable');
+		return s.data;
+	}
+	async forget() {}
+}
+
 export function createFakeApis(): ExternalApis {
 	return {
+		offsite: new FakeOffsite(),
 		proxmox: new FakeProxmox(),
 		github: new FakeGithub(),
 		ovh: new FakeOvh(),

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
@@ -16,6 +17,7 @@
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import History from '@lucide/svelte/icons/history';
 	import Download from '@lucide/svelte/icons/download';
+	import CloudUpload from '@lucide/svelte/icons/cloud-upload';
 	import PageHeader from '$lib/components/molecules/page-header.svelte';
 	import SectionCard from '$lib/components/molecules/section-card.svelte';
 	import SettingField from '$lib/components/molecules/setting-field.svelte';
@@ -40,7 +42,8 @@
 	const v = $derived(data.values);
 	const set = $derived(data.secretsSet);
 
-	let tab = $state('connections');
+	// ?tab=offsite (lien depuis l'onglet Base de données d'un projet).
+	let tab = $state(page.url.searchParams.get('tab') ?? 'connections');
 	let testing = $state(false);
 	let report = $state<{ sections: CheckSection[]; permissions: PermissionRow[]; checkedAt: number } | null>(null);
 	let keyConfirm = $state(false);
@@ -113,6 +116,7 @@
 		{ value: 'ovh', label: 'OVH', icon: Globe },
 		{ value: 'npm', label: 'NPM', icon: Waypoints },
 		{ value: 'ssh', label: 'Clé SSH', icon: KeySquare },
+		{ value: 'offsite', label: 'Sauvegardes R2', icon: CloudUpload },
 		{ value: 'security', label: 'Sécurité', icon: ShieldCheck },
 		{ value: 'update', label: 'Mise à jour', icon: Download }
 	];
@@ -356,6 +360,58 @@
 				{#snippet footer()}<Button type="submit" size="sm"><Save /> Enregistrer</Button>{/snippet}
 			</SectionCard>
 		</form>
+	</Tabs.Content>
+
+	<!-- Sauvegardes hors serveur -->
+	<Tabs.Content value="offsite">
+		<form method="POST" action="?/save" use:enhance={saveHandler}>
+			<input type="hidden" name="_section" value="offsite" />
+			<SectionCard
+				title="Sauvegardes hors serveur (Cloudflare R2)"
+				description="Forge envoie seul, chiffré : sa propre base toutes les heures, les bases des projets chaque nuit. Rétention 7 jours / 4 semaines / 6 mois, test de restauration chaque mois."
+				icon={CloudUpload}
+			>
+				<ol class="mb-5 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+					<li>Cloudflare → R2 → <b>Créer un bucket</b> (ex. <code>forge-backups</code>).</li>
+					<li>R2 → <b>Gérer les jetons d'API R2</b> → Créer : permission « Lecture et écriture d'objets », limitée à ce bucket.</li>
+					<li>Copiez ici l'adresse S3 (<code>https://&lt;compte&gt;.r2.cloudflarestorage.com</code>), l'ID de clé et le secret. C'est tout.</li>
+				</ol>
+				<div class="grid gap-5 md:grid-cols-2">
+					<SettingField name="offsite.endpoint" label="Adresse S3 du compte" value={v['offsite.endpoint']} placeholder="https://xxxx.r2.cloudflarestorage.com" />
+					<SettingField name="offsite.bucket" label="Bucket" value={v['offsite.bucket']} placeholder="forge-backups" />
+					<SettingField name="offsite.accessKeyId" label="ID de clé d'accès" value={v['offsite.accessKeyId']} />
+					<SettingField name="offsite.secretAccessKey" label="Clé d'accès secrète" secret secretSet={set['offsite.secretAccessKey']} />
+				</div>
+				<p class="mt-4 text-xs text-muted-foreground">
+					Le chiffrement utilise une clé dérivée de <code>FORGE_MASTER_KEY</code> : gardez-la dans votre gestionnaire de mots de passe, elle suffit (avec la clé R2) pour tout relire.
+				</p>
+				{#snippet footer()}<Button type="submit" size="sm"><Save /> Enregistrer</Button>{/snippet}
+			</SectionCard>
+		</form>
+		<SectionCard title="État" description="Mis à jour à chaque passage (toutes les heures)." icon={History}>
+			{@const st = data.offsite}
+			{#if !data.offsiteConfigured}
+				<p class="text-sm text-muted-foreground">Pas encore configuré.</p>
+			{:else}
+				<ul class="space-y-1 text-sm">
+					{#each [['Base de Forge', st.forge], ['Bases des projets', st.projects], ['Rétention', st.prune], ['Test de restauration', st.restoreTest]] as [label, r] (label)}
+						{@const run = r as { at: number; ok: boolean; simulated?: boolean; error?: string } | undefined}
+						<li>
+							<span class="font-medium">{label}</span> :
+							{#if !run}<span class="text-muted-foreground">jamais</span>
+							{:else if run.ok}<span class="text-emerald-600">OK</span> le {new Date(run.at).toLocaleString('fr-FR')}{run.simulated ? ' (DRY_RUN : rien envoyé)' : ''}
+							{:else}<span class="text-destructive">échec</span> le {new Date(run.at).toLocaleString('fr-FR')} : {run.error}{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+			{#snippet footer()}
+				<form method="POST" action="?/offsiteRun" use:enhance={() => async ({ update, result }) => { await update(); if (result.type === 'success') toast.success('Sauvegarde hors serveur terminée'); }}>
+					<Button type="submit" size="sm" variant="outline" disabled={!data.offsiteConfigured}><CloudUpload /> Sauvegarder maintenant</Button>
+				</form>
+				{#if form?.section === 'offsite' && form?.error}<p class="text-sm text-destructive">{form.error}</p>{/if}
+			{/snippet}
+		</SectionCard>
 	</Tabs.Content>
 
 	<!-- SSH -->

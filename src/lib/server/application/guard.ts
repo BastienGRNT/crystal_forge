@@ -9,7 +9,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { SafetyViolation } from '$lib/domain/errors';
 import type { LogLevel } from '$server/infrastructure/db/schema';
 
-export type WriteSystem = 'proxmox' | 'github' | 'ovh' | 'npm' | 'ssh';
+export type WriteSystem = 'proxmox' | 'github' | 'ovh' | 'npm' | 'ssh' | 'r2';
 
 export interface ExecutionScope {
 	jobId: number | null;
@@ -46,7 +46,8 @@ const SYSTEM_LABEL: Record<WriteSystem, string> = {
 	github: 'GitHub',
 	ovh: 'OVH',
 	npm: 'NPM',
-	ssh: 'SSH'
+	ssh: 'SSH',
+	r2: 'R2'
 };
 
 export class WriteGuard {

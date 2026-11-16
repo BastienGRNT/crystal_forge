@@ -18,7 +18,7 @@ export const load: PageServerLoad = async ({ params, depends }) => {
 	const p = f.projects.get(params.slug);
 	if (!p.dbService || !isSqlDbKind(p.dbKind)) {
 		// Le compose (GitHub) n'est lu que pour choisir la base.
-		return { configured: false as const, candidates: await settle(f.database.candidates(p)), info: null, tables: null, backups: null };
+		return { configured: false as const, candidates: await settle(f.database.candidates(p)), info: null, tables: null, backups: null, offsiteConfigured: false, offsite: null };
 	}
 	// Lectures par SSH : la page s'affiche tout de suite, elles arrivent ensuite.
 	return {
@@ -26,7 +26,9 @@ export const load: PageServerLoad = async ({ params, depends }) => {
 		candidates: { value: [], error: null },
 		info: settle(f.database.info(p)),
 		tables: settle(f.database.tables(p)),
-		backups: settle(f.database.backups(p))
+		backups: settle(f.database.backups(p)),
+		offsiteConfigured: f.offsite.configured(),
+		offsite: settle(f.offsite.forProject(p))
 	};
 };
 
@@ -74,6 +76,15 @@ export const actions: Actions = {
 		try {
 			const res = await f.database.importDump(f.projects.get(params.slug), { name: file.name, data: Buffer.from(await file.arrayBuffer()) });
 			return { imported: res };
+		} catch (err) {
+			return fail(400, { error: errorMessage(err) });
+		}
+	},
+	offsiteFetch: async ({ params, request }) => {
+		const f = forge();
+		const id = String((await request.formData()).get('snapshot') ?? '');
+		try {
+			return { fetched: await f.offsite.fetchToProject(f.projects.get(params.slug), id) };
 		} catch (err) {
 			return fail(400, { error: errorMessage(err) });
 		}
