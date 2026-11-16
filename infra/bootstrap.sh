@@ -80,7 +80,8 @@ fi
 
 # Droits à jour = le jeton peut gérer ses sauvegardes et régler la RAM du CT 150 (ajoutés le 2026-11-16).
 token_has() { pveum user token permissions forge@pve forge --path "$1" --output-format json 2>/dev/null | perl -MJSON::PP -e 'local $/; my $j=decode_json(<STDIN>); my %p = map { %{$_} } values %$j; exit !exists $p{$ARGV[0]}' "$2"; }
-if step 02 "Accès Proxmox de Forge (forge@pve)" 'token_has /storage/forge-backups Datastore.Allocate && token_has / Sys.Modify && token_has /vms/150 VM.Config.Memory'; then
+zfs_ok() { ! pvesm status --storage forge-ct >/dev/null 2>&1 || token_has /storage/forge-ct Datastore.AllocateSpace; }
+if step 02 "Accès Proxmox de Forge (forge@pve)" 'token_has /storage/forge-backups Datastore.Allocate && token_has / Sys.Modify && token_has /vms/150 VM.Config.Memory && zfs_ok'; then
 	info "Si le jeton existe déjà, répondez « N » à « Régénérer le jeton ? » : seuls les droits sont mis à jour."
 	FORGE_DELIVER_CT=150 bash "$INFRA_DIR/02-proxmox-forge-access.sh"
 else

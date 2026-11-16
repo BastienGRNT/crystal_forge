@@ -14,6 +14,7 @@ import {
 	backupStep,
 	destroyCtStep,
 	finalizeStep,
+	moveStorageStep,
 	powerStep,
 	removeDomainStep,
 	rollbackStep,
@@ -40,6 +41,7 @@ export const STEPS: Record<string, StepDefinition> = Object.fromEntries(
 		proxyRepointStep,
 		pipelineStep,
 		powerStep,
+		moveStorageStep,
 		removeDomainStep,
 		backupStep,
 		teardownGithubStep,
@@ -108,6 +110,11 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
 		type: 'power',
 		label: 'Alimentation du CT',
 		steps: () => ['power']
+	},
+	move_storage: {
+		type: 'move_storage',
+		label: 'Passage du disque sur ZFS',
+		steps: () => ['move_storage']
 	},
 	delete_project: {
 		type: 'delete_project',

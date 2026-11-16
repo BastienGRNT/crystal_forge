@@ -268,6 +268,11 @@ export class ProxmoxClient implements ProxmoxApi {
 		return typeof r === 'string' ? r : null;
 	}
 
+	/** Déplace un volume du CT vers un autre stockage (CT arrêté ; refusé si des instantanés existent et delete=1). */
+	moveVolume(vmid: number, volume: string, storage: string) {
+		return this.#call<string>('POST', `/nodes/${this.#node}/lxc/${vmid}/move_volume`, { volume, storage, delete: 1 });
+	}
+
 	power(vmid: number, action: PowerAction) {
 		return this.#call<string>('POST', `/nodes/${this.#node}/lxc/${vmid}/status/${action}`, action === 'shutdown' ? { timeout: 60 } : {});
 	}

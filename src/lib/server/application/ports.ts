@@ -117,6 +117,7 @@ export interface ProxmoxApi {
 	updateConfig(vmid: number, config: Record<string, string | number>): Promise<void>;
 	resize(vmid: number, disk: string, size: string): Promise<string | null>;
 	power(vmid: number, action: PowerAction): Promise<string>;
+	moveVolume(vmid: number, volume: string, storage: string): Promise<string>;
 	destroy(vmid: number): Promise<string>;
 	vzdump(vmid: number, storage: string): Promise<string>;
 	/** POST /cluster/backup (Sys.Modify sur « / » + Datastore.Allocate sur le stockage). */

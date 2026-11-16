@@ -15,6 +15,7 @@
 #                                                          template 900 : VM.Clone, et créer : VM.Allocate)
 #       /pool/forge                     PVEPoolUser        Pool.Audit : voir à quel pool appartient chaque CT
 #       /storage/local                  PVEDatastoreUser   allouer les disques des clones + vzdump
+#       /storage/forge-ct (si présent)  PVEDatastoreUser   disques ZFS des CT (créé par infra/09)
 #       /sdn/zones/localnetwork/nat     PVESDNUser         utiliser le bridge « nat » (SDN.Use, PVE 8+/9)
 #     Entretien automatique par Forge (aucun script à lancer à la main) :
 #       / (sans propagation)            ForgeBackupJobs    Sys.Modify : créer/modifier SES jobs de sauvegarde
@@ -83,6 +84,9 @@ ACLS=(
 	"$SDN_PATH|PVESDNUser|1"
 )
 for id in "${CRITICAL_CTIDS[@]}"; do ACLS+=("/vms/$id|ForgeCriticalTune|0"); done
+# Stockage ZFS des CT (créé par infra/09) : allouer les disques des nouveaux CT et y déplacer les anciens.
+ZFS_STORAGE="forge-ct"
+pvesm status --storage "$ZFS_STORAGE" >/dev/null 2>&1 && ACLS+=("/storage/$ZFS_STORAGE|PVEDatastoreUser|1")
 # Seuls privilèges non-lecture admis sur un CT de prod (exactement ceux de ForgeCriticalTune).
 CRITICAL_PRIVS="VM.Backup VM.Config.CPU VM.Config.Memory"
 

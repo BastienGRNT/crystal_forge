@@ -171,6 +171,7 @@ class FakeProxmox implements ProxmoxApi {
 			'/': privs(AUDITOR),
 			'/pool/forge': privs([...AUDITOR, ...VMADMIN]),
 			'/storage/local': privs(['Datastore.Audit', 'Datastore.AllocateSpace']),
+			'/storage/forge-ct': privs(['Datastore.Audit', 'Datastore.AllocateSpace']),
 			'/sdn/zones/localnetwork/nat': privs(['SDN.Audit', 'SDN.Use'])
 		};
 		for (const g of world().guests.values()) {
@@ -361,6 +362,15 @@ class FakeProxmox implements ProxmoxApi {
 		return this.#task([`Resizing image: Image resized.`, `resize2fs 1.47.2 (1-Jan-2025)`, `The filesystem on /dev/loop0 is now ${gb * 262144} (4k) blocks long.`, 'TASK OK'], 1200, () => {
 			g.diskGb = gb;
 			g.config.rootfs = String(g.config.rootfs).replace(/size=\d+G/, `size=${gb}G`);
+		});
+	}
+
+	async moveVolume(vmid: number, _volume: string, storage: string) {
+		await delay();
+		const g = this.#requireWrite(vmid, 'VM.Config.Disk');
+		if (g.status === 'running') throw new ExternalApiError('Proxmox', 'cannot move volumes of a running container', 500);
+		return this.#task([`moving volume 'rootfs' to '${storage}'`, 'TASK OK'], 2000, () => {
+			g.config.rootfs = String(g.config.rootfs).replace(/^[^:]+:[^,]+/, `${storage}:subvol-${vmid}-disk-0`);
 		});
 	}
 

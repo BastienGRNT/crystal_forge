@@ -17,6 +17,10 @@
 #   5. Jobs « forge-* » déjà créés par l'ancien script 01 : basculés sur
 #      forge-backups, sans leur tmpdir (sinon Forge ne pourrait plus les modifier).
 #      Les anciennes sauvegardes restent sur « local » (rien n'est supprimé).
+#   6. Stockage « forge-ct » (zfspool, dataset <pool>/forge-ct, contenu rootdir,
+#      sparse) sur le pool ZFS qui porte /var/lib/vz. Les nouveaux CT y sont créés
+#      par Forge ; les anciens y passent depuis Forge (onglet Conteneur). Ignoré si
+#      /var/lib/vz n'est pas sur ZFS.
 #
 # Ne touche à AUCUN CT. Idempotent : ne fait que ce qui manque.
 # Usage : bash infra/09-host-setup.sh   (ou bash infra/bootstrap.sh)
@@ -30,16 +34,23 @@ BK_STORAGE="forge-backups"
 BK_PATH="/var/lib/vz/forge-backups"
 BK_TMP="$BK_PATH/tmp"
 SWAPPINESS=10
+ZFS_STORAGE="forge-ct"
+# Pool ZFS qui porte /var/lib/vz (ex. « data/vz » → « data »), vide si ce n'est pas du ZFS.
+vz_src="$(findmnt -no FSTYPE,SOURCE --target /var/lib/vz 2>/dev/null || true)"
+ZFS_POOL=""
+[[ "$vz_src" == zfs\ * ]] && ZFS_POOL="$(awk '{print $2}' <<<"$vz_src" | cut -d/ -f1)"
+ZFS_DATASET="${ZFS_POOL:+$ZFS_POOL/$ZFS_STORAGE}"
 
 total_bytes=$(awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo)
 arc_target=$(( total_bytes / 10 ))
 (( arc_target < 1073741824 )) && arc_target=1073741824
 
-todo_arc=0 todo_swap=0 todo_storage=0 todo_tmpdir=0
+todo_arc=0 todo_swap=0 todo_storage=0 todo_tmpdir=0 todo_zfs=0
 if [[ -r /sys/module/zfs/parameters/zfs_arc_max ]] && ! grep -qs "zfs_arc_max=$arc_target\b" /etc/modprobe.d/zfs.conf; then todo_arc=1; fi
 grep -qs "^vm.swappiness = $SWAPPINESS$" /etc/sysctl.d/90-forge.conf || todo_swap=1
 pvesm status --storage "$BK_STORAGE" >/dev/null 2>&1 || todo_storage=1
 grep -qsx "tmpdir: $BK_TMP" /etc/vzdump.conf || todo_tmpdir=1
+if [[ -n "$ZFS_POOL" ]] && ! pvesm status --storage "$ZFS_STORAGE" >/dev/null 2>&1; then todo_zfs=1; fi
 # Jobs forge-* à migrer : « id<TAB>a_un_tmpdir », pour ceux qui ne sont pas sur forge-backups ou ont un tmpdir.
 mapfile -t jobs_to_migrate < <(pvesh get /cluster/backup --output-format json | perl -MJSON::PP -e '
 	local $/; for (@{decode_json(<STDIN>)}) {
@@ -48,13 +59,14 @@ mapfile -t jobs_to_migrate < <(pvesh get /cluster/backup --output-format json | 
 	}' "$BK_STORAGE")
 
 title "Réglages de l'hôte"
-if (( todo_arc + todo_swap + todo_storage + todo_tmpdir + ${#jobs_to_migrate[@]} == 0 )); then
+if (( todo_arc + todo_swap + todo_storage + todo_tmpdir + todo_zfs + ${#jobs_to_migrate[@]} == 0 )); then
 	ok "Tout est déjà en place : rien à faire."
 	exit 0
 fi
 (( todo_arc )) && plan "Plafond du cache ZFS : $(( arc_target / 1048576 )) Mo (à chaud + /etc/modprobe.d/zfs.conf)"
 (( todo_swap )) && plan "vm.swappiness = $SWAPPINESS (à chaud + /etc/sysctl.d/90-forge.conf)"
 (( todo_storage )) && plan "Créer le stockage « $BK_STORAGE » ($BK_PATH, contenu : sauvegardes)"
+(( todo_zfs )) && plan "Créer le stockage ZFS « $ZFS_STORAGE » (dataset $ZFS_DATASET, disques des CT)"
 (( todo_tmpdir )) && plan "/etc/vzdump.conf : tmpdir: $BK_TMP"
 for j in "${jobs_to_migrate[@]}"; do plan "Job « ${j%%$'\t'*} » → stockage $BK_STORAGE$([[ ${j##*$'\t'} == 1 ]] && echo ', sans tmpdir')"; done
 confirm "Appliquer ?"
@@ -97,6 +109,12 @@ if (( todo_tmpdir )); then
 		run sh -c "echo 'tmpdir: $BK_TMP' >> /etc/vzdump.conf"
 	fi
 	ok "Dossier temporaire des sauvegardes : $BK_TMP"
+fi
+
+if (( todo_zfs )); then
+	zfs list -H -o name "$ZFS_DATASET" >/dev/null 2>&1 || run zfs create "$ZFS_DATASET"
+	run pvesm add zfspool "$ZFS_STORAGE" --pool "$ZFS_DATASET" --content rootdir --sparse 1
+	ok "Stockage ZFS « $ZFS_STORAGE » créé : Forge y mettra les nouveaux CT."
 fi
 
 for j in "${jobs_to_migrate[@]}"; do

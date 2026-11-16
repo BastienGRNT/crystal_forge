@@ -50,6 +50,7 @@
 	let confirm = $state<{ action: string; title: string; description: string } | null>(null);
 	let confirmOpen = $state(false);
 	let powerForm: HTMLFormElement | undefined = $state();
+	let moving = $state(false);
 	let powerAction = $state('');
 
 	let tail = $state('200');
@@ -149,9 +150,23 @@
 				<KeyValue label="Démarrage auto">{c.onboot ? 'Oui' : 'Non'}</KeyValue>
 				<KeyValue label="Swap">{c.swap ?? '—'} Mo</KeyValue>
 				<KeyValue label="Disque" mono>{c.rootfs ?? '—'}</KeyValue>
+				<KeyValue label="Stockage">{data.storage.current ?? '—'}{data.storage.current === data.storage.zfs ? ' (ZFS)' : ''}</KeyValue>
 				<KeyValue label="Clé d'hôte SSH" mono>{data.project.sshHostKey ?? 'pas encore vue'}</KeyValue>
 			</dl>
 		</SectionCard>
+
+		{#if data.storage.canMove}
+			<Alert.Root>
+				<HardDrive />
+				<Alert.Title>Disque sur « {data.storage.current} » : passer sur ZFS ?</Alert.Title>
+				<Alert.Description>
+					<p>Le stockage ZFS « {data.storage.zfs} » est prêt : disque compressé, place réellement utilisée, sauvegardes plus rapides. Forge éteint le CT, copie le disque, puis le rallume (quelques minutes de coupure).</p>
+					<form method="POST" action="?/moveToZfs" use:enhance={() => { moving = true; return async ({ update }) => { await update(); moving = false; }; }} class="mt-2">
+						<Button type="submit" size="sm" variant="outline" disabled={!!data.activeJob || moving}>{#if moving}<Spinner />{/if} Passer sur ZFS</Button>
+					</form>
+				</Alert.Description>
+			</Alert.Root>
+		{/if}
 
 		{#if diskRatio > 0.8}
 			<Alert.Root class="border-warning/40 text-warning">

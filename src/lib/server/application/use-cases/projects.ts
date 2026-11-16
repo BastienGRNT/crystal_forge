@@ -350,6 +350,14 @@ export class ProjectService {
 		return this.engine.enqueue({ type: 'power', projectId: p.id, params: { action } }).id;
 	}
 
+	/** Déplace le disque du CT sur le stockage ZFS de Forge (job : arrêt, copie, redémarrage). */
+	async moveToZfs(p: ProjectRow): Promise<number> {
+		this.#assertNoActiveJob(p);
+		if (!p.ctid) throw new UserFacingError('Le projet n’a pas encore de CT.');
+		if (!(await this.s.proxmox.zfsStorageReady())) throw new UserFacingError('Le stockage ZFS « forge-ct » n’est pas encore prêt : relancez infra/bootstrap.sh sur l’hôte.');
+		return this.engine.enqueue({ type: 'move_storage', projectId: p.id, params: {} }).id;
+	}
+
 	/** Pare-feu Proxmox du CT : règles Forge attendues vs en place. */
 	async firewallView(p: ProjectRow) {
 		const plan = firewallPlan(this.s, p);

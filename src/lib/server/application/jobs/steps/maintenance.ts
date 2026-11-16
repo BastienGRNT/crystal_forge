@@ -1,4 +1,5 @@
 /** Étapes de maintenance : alimentation, retrait de domaine, suppression de projet, rollback. */
+import { FORGE_ZFS_STORAGE, rootfsStorage } from '$lib/domain/storage';
 import { ExternalApiError } from '$lib/domain/errors';
 import { FORGE_SECRET_NAME } from '$lib/domain/safety-policy';
 import type { ResourceRow } from '$server/infrastructure/db/schema';
@@ -146,6 +147,37 @@ export const powerStep: StepDefinition = {
 		const upid = await ctx.services.proxmox.power(p.ctid, action);
 		await ctx.services.proxmox.waitTask(upid, { timeoutMs: 3 * 60_000 });
 		ctx.log('success', `Action « ${action} » terminée sur le CT ${p.ctid}.`);
+	}
+};
+
+/** Disque du CT vers le stockage ZFS : arrêt propre, déplacement, redémarrage s'il tournait. */
+export const moveStorageStep: StepDefinition = {
+	key: 'move_storage',
+	label: 'Passage du disque sur ZFS',
+	async run(ctx) {
+		const { proxmox } = ctx.services;
+		const p = ctx.project();
+		if (!p.ctid) throw new Error('Projet sans CT.');
+		const current = rootfsStorage(String((await proxmox.guestConfig(p.ctid)).rootfs ?? ''));
+		if (current === FORGE_ZFS_STORAGE) {
+			ctx.log('info', `Le disque est déjà sur ${FORGE_ZFS_STORAGE}.`);
+			return;
+		}
+		const wasRunning = (await proxmox.guests()).find((g) => g.vmid === p.ctid)?.status === 'running';
+		if (wasRunning) {
+			await proxmox.waitTask(await proxmox.power(p.ctid, 'shutdown'), { timeoutMs: 3 * 60_000 });
+			ctx.log('info', `CT ${p.ctid} éteint (le site est coupé pendant la copie).`);
+		}
+		try {
+			await proxmox.waitTask(await proxmox.moveRootfsToZfs(p.ctid), { timeoutMs: 60 * 60_000 });
+			ctx.log('success', `Disque déplacé de ${current ?? '?'} vers ${FORGE_ZFS_STORAGE}.`);
+		} finally {
+			// Même si la copie échoue, le CT est rallumé sur son ancien disque.
+			if (wasRunning) {
+				await proxmox.waitTask(await proxmox.power(p.ctid, 'start'), { timeoutMs: 3 * 60_000 });
+				ctx.log('info', `CT ${p.ctid} rallumé.`);
+			}
+		}
 	}
 };
 

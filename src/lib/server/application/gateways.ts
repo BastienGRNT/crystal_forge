@@ -30,6 +30,7 @@ import {
 } from '$lib/domain/safety-policy';
 import { assertSafeBackupJob, assertSafeCriticalCtTune, type DesiredBackupJob } from '$lib/domain/host-maintenance';
 import { OFFSITE_RETENTION, assertOffsitePath, assertSnapshotId, parseSnapshots, resticRepository, retentionArgs, type OffsiteSnapshot } from '$lib/domain/offsite';
+import { FORGE_ZFS_STORAGE, assertSafeVolumeMove } from '$lib/domain/storage';
 import { TtlCache } from './cache';
 import { DRY_PREFIX, isSimulated, type WriteGuard, type WriteOp } from './guard';
 import type {
@@ -209,21 +210,44 @@ export class ProxmoxGateway {
 		assertCanModifyCt(this.d.settings.safetyContext(), await this.#facts(vmid), this.#owned());
 	}
 
-	cloneTemplate(newId: number, hostname: string, description: string): Promise<string> {
+	/**
+	 * Le stockage ZFS « forge-ct » est-il prêt (créé par infra/09, droits donnés par infra/02) ?
+	 * Lecture seule, gardée 60 s.
+	 */
+	zfsStorageReady(): Promise<boolean> {
+		return this.#cache.get('zfs-ready', 60_000, async () => {
+			try {
+				const perms = await this.api.permissions(`/storage/${FORGE_ZFS_STORAGE}`);
+				if (!perms[`/storage/${FORGE_ZFS_STORAGE}`]?.['Datastore.AllocateSpace']) return false;
+				await this.api.storageStatus(FORGE_ZFS_STORAGE);
+				return true;
+			} catch {
+				return false;
+			}
+		});
+	}
+
+	/** Stockage des nouveaux CT : forge-ct dès qu'il est prêt, sinon le réglage (local). */
+	async ctStorage(): Promise<string> {
+		return (await this.zfsStorageReady()) ? FORGE_ZFS_STORAGE : this.d.settings.get('proxmox.storage');
+	}
+
+	async cloneTemplate(newId: number, hostname: string, description: string): Promise<string> {
 		const s = this.d.settings;
 		const templateId = s.int('proxmox.templateId');
 		const pool = s.get('proxmox.pool');
+		const storage = await this.ctStorage();
 		return this.#run({
 			system: 'proxmox',
 			action: 'lxc.clone',
-			summary: `Cloner le template ${templateId} → CT ${newId} « ${hostname} » (pool ${pool}, clone complet sur ${s.get('proxmox.storage')})`,
+			summary: `Cloner le template ${templateId} → CT ${newId} « ${hostname} » (pool ${pool}, clone complet sur ${storage})`,
 			check: async () => {
 				const existingIds = (await this.api.guests()).map((g) => g.vmid);
 				assertCanCloneCt(s.safetyContext(), { sourceId: templateId, newId, pool, existingIds });
 				if (!(await this.api.isIdFree(newId))) throw new SafetyViolation('clone.exists', `Le CTID ${newId} est déjà pris.`);
 			},
 			execute: () =>
-				this.api.clone(templateId, { newid: newId, hostname, pool, storage: s.get('proxmox.storage'), full: true, description }),
+				this.api.clone(templateId, { newid: newId, hostname, pool, storage, full: true, description }),
 			simulate: () => {
 				this.#simulatedCts.add(newId);
 				return `${DRY_PREFIX}:clone:${newId}`;
@@ -256,6 +280,22 @@ export class ProxmoxGateway {
 			check: () => this.#assertModifiable(vmid),
 			execute: () => this.api.resize(vmid, 'rootfs', `${sizeGb}G`),
 			simulate: () => `${DRY_PREFIX}:resize:${vmid}`
+		});
+	}
+
+	/** Déplace le disque principal d'un CT Forge vers le stockage ZFS (CT arrêté, ancien disque supprimé). */
+	moveRootfsToZfs(vmid: number): Promise<string> {
+		return this.#run({
+			system: 'proxmox',
+			action: 'lxc.move_volume',
+			summary: `Déplacer le disque du CT ${vmid} vers ${FORGE_ZFS_STORAGE} (l'ancien disque est supprimé après copie)`,
+			check: async () => {
+				assertSafeVolumeMove('rootfs', FORGE_ZFS_STORAGE);
+				await this.#assertModifiable(vmid);
+				if (!(await this.zfsStorageReady())) throw new SafetyViolation('move.storage', `Le stockage ${FORGE_ZFS_STORAGE} n'est pas prêt (relancez infra/bootstrap.sh).`);
+			},
+			execute: () => this.api.moveVolume(vmid, 'rootfs', FORGE_ZFS_STORAGE),
+			simulate: () => `${DRY_PREFIX}:move:${vmid}`
 		});
 	}
 
