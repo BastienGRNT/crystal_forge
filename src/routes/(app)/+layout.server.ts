@@ -13,10 +13,19 @@ export const load: LayoutServerLoad = async ({ depends, locals }) => {
 		(n) => ({ memUsed: hostMemoryInUse(n.memory), memTotal: n.memory.total, cpu: n.cpu }),
 		() => null
 	);
-	const projects = visibleProjects(f, user).map((p) => ({ slug: p.slug, name: p.name, status: p.status }));
+	const projects = visibleProjects(f, user).map((p) => ({ slug: p.slug, name: p.name, status: p.status, environment: p.environment, sleeping: !!p.sleepingSince }));
 	const ids = f.auth.visibleProjectIds(user);
-	const activeJobs = f.repos.jobs
+	const active = f.repos.jobs
 		.byStatus(['queued', 'running', 'awaiting_input', 'rolling_back'])
-		.filter((j) => !ids || (j.projectId != null && ids.has(j.projectId))).length;
-	return { user: { username: user.username, role: user.role, canCreate: f.auth.canCreateProjects(user) }, mode: f.config.mode, dryRun: f.isDryRun(), host, projects, activeJobs };
+		.filter((j) => !ids || (j.projectId != null && ids.has(j.projectId)));
+	return {
+		user: { username: user.username, role: user.role, canCreate: f.auth.canCreateProjects(user) },
+		mode: f.config.mode,
+		dryRun: f.isDryRun(),
+		host,
+		projects,
+		activeJobs: active.length,
+		/** Jobs en cours, pour le menu « Activité » de la barre du haut. */
+		activeJobList: active.slice(0, 8).map((j) => f.jobs.summary(j))
+	};
 };

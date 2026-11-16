@@ -109,17 +109,26 @@
 	};
 
 	const tabs = [
-		{ value: 'connections', label: 'Connexions', icon: PlugZap },
-		{ value: 'proxmox', label: 'Proxmox', icon: Server },
-		{ value: 'network', label: 'Réseau & plages', icon: Network },
-		{ value: 'github', label: 'GitHub', icon: GithubIcon },
-		{ value: 'ovh', label: 'OVH', icon: Globe },
-		{ value: 'npm', label: 'NPM', icon: Waypoints },
-		{ value: 'ssh', label: 'Clé SSH', icon: KeySquare },
-		{ value: 'offsite', label: 'Sauvegardes R2', icon: CloudUpload },
-		{ value: 'security', label: 'Sécurité', icon: ShieldCheck },
-		{ value: 'update', label: 'Mise à jour', icon: Download }
+		{ value: 'connections', label: 'État des connexions', icon: PlugZap, group: 'Général' },
+		{ value: 'security', label: 'Sécurité & simulation', icon: ShieldCheck, group: 'Général' },
+		{ value: 'update', label: 'Mise à jour', icon: Download, group: 'Général' },
+		{ value: 'proxmox', label: 'Proxmox', icon: Server, group: 'Infrastructure' },
+		{ value: 'network', label: 'Réseau & plages', icon: Network, group: 'Infrastructure' },
+		{ value: 'ssh', label: 'Clé SSH', icon: KeySquare, group: 'Infrastructure' },
+		{ value: 'offsite', label: 'Sauvegardes R2', icon: CloudUpload, group: 'Infrastructure' },
+		{ value: 'github', label: 'GitHub', icon: GithubIcon, group: 'Services' },
+		{ value: 'ovh', label: 'OVH (DNS)', icon: Globe, group: 'Services' },
+		{ value: 'npm', label: 'Proxy NPM', icon: Waypoints, group: 'Services' }
 	];
+	const groups = [...new Set(tabs.map((t) => t.group))];
+	// L'onglet est dans l'URL : lien direct, retour arrière et rechargement gardent la section.
+	$effect(() => {
+		const u = new URL(window.location.href);
+		if (u.searchParams.get('tab') === tab) return;
+		u.searchParams.set('tab', tab);
+		history.replaceState(history.state, '', u);
+	});
+
 </script>
 
 {#snippet extraAccounts(kind: 'github' | 'ovh')}
@@ -165,12 +174,15 @@
 
 <svelte:head><title>Réglages · Forge</title></svelte:head>
 
-<PageHeader title="Réglages" description="Les jetons sont chiffrés en base (AES-256-GCM) et ne sont jamais renvoyés au navigateur." />
+<PageHeader title="Réglages" description="Connexions aux services et comportement de Forge. Les jetons sont chiffrés en base et ne sont jamais renvoyés au navigateur." />
 
-<Tabs.Root bind:value={tab} class="gap-6">
-	<Tabs.List class="scrollbar-thin h-auto w-full justify-start overflow-x-auto">
-		{#each tabs as t (t.value)}
-			<Tabs.Trigger value={t.value} class="flex-none gap-1.5"><t.icon class="size-4" />{t.label}</Tabs.Trigger>
+<Tabs.Root bind:value={tab} orientation="vertical" class="items-start gap-8 max-md:flex-col [&>[data-slot=tabs-content]]:w-full [&>[data-slot=tabs-content]]:min-w-0 [&>[data-slot=tabs-content]]:flex-1">
+	<Tabs.List variant="line" class="scrollbar-thin w-full shrink-0 items-stretch gap-0.5 max-md:flex-row! max-md:overflow-x-auto md:sticky md:top-20 md:w-56">
+		{#each groups as gr (gr)}
+			<p class="mt-3 mb-1 px-2 text-[11px] font-semibold tracking-wider text-muted-foreground/70 uppercase first:mt-0 max-md:hidden">{gr}</p>
+			{#each tabs.filter((t) => t.group === gr) as t (t.value)}
+				<Tabs.Trigger value={t.value} class="h-8 flex-none justify-start gap-2 px-2.5 data-active:bg-accent! data-active:after:opacity-0!"><t.icon class="size-4" />{t.label}</Tabs.Trigger>
+			{/each}
 		{/each}
 	</Tabs.List>
 

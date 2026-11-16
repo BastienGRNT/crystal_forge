@@ -1,53 +1,46 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import Menu from '@lucide/svelte/icons/menu';
 	import * as Sheet from '$lib/components/atoms/ui/sheet';
-	import { Button } from '$lib/components/atoms/ui/button';
-	import Logo from '$lib/components/atoms/logo.svelte';
 	import AppSidebar from '$lib/components/organisms/app-sidebar.svelte';
-	import ModeBanner from '$lib/components/organisms/mode-banner.svelte';
+	import TopBar from '$lib/components/organisms/top-bar.svelte';
+	import type { JobSummary } from '$server/application/use-cases/jobs';
 
 	let {
 		mode,
 		dryRun,
 		projects,
 		activeJobs,
+		activeJobList,
 		host,
 		user,
 		children
 	}: {
 		mode: 'live' | 'mock';
 		dryRun: boolean;
-		projects: { slug: string; name: string; status: string }[];
+		projects: { slug: string; name: string; status: string; environment: string; sleeping: boolean }[];
 		activeJobs: number;
+		activeJobList: JobSummary[];
 		host: { memUsed: number; memTotal: number; cpu: number } | null;
-		user: { username: string; role: 'admin' | 'collaborator' };
+		user: { username: string; role: 'admin' | 'collaborator'; canCreate?: boolean };
 		children: Snippet;
 	} = $props();
 	let mobileOpen = $state(false);
 </script>
 
 <div class="flex min-h-dvh">
-	<aside class="sticky top-0 hidden h-dvh w-64 shrink-0 border-r border-sidebar-border bg-sidebar lg:block">
+	<aside class="sticky top-0 hidden h-dvh w-60 shrink-0 border-r border-sidebar-border bg-sidebar lg:block">
 		<AppSidebar {projects} {activeJobs} {host} {user} />
 	</aside>
 
+	<Sheet.Root bind:open={mobileOpen}>
+		<Sheet.Content side="left" class="w-72 bg-sidebar p-0">
+			<AppSidebar {projects} {activeJobs} {host} {user} onNavigate={() => (mobileOpen = false)} />
+		</Sheet.Content>
+	</Sheet.Root>
+
 	<div class="flex min-w-0 flex-1 flex-col">
-		<ModeBanner {mode} {dryRun} />
-		<div class="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur lg:hidden">
-			<Sheet.Root bind:open={mobileOpen}>
-				<Sheet.Trigger>
-					{#snippet child({ props })}
-						<Button {...props} variant="ghost" size="icon" aria-label="Menu"><Menu /></Button>
-					{/snippet}
-				</Sheet.Trigger>
-				<Sheet.Content side="left" class="w-72 bg-sidebar p-0">
-					<AppSidebar {projects} {activeJobs} {host} {user} onNavigate={() => (mobileOpen = false)} />
-				</Sheet.Content>
-			</Sheet.Root>
-			<a href="/"><Logo /></a>
-		</div>
-		<main class="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
+		<TopBar {mode} {dryRun} {activeJobList} onMenu={() => (mobileOpen = true)} />
+		<main class="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
 			{@render children()}
 		</main>
 	</div>

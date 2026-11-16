@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { getJson, latest } from '$lib/fetch-json';
 	import { onMount } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { invalidate } from '$app/navigation';
@@ -13,8 +12,6 @@
 	import Container from '@lucide/svelte/icons/container';
 	import Layers from '@lucide/svelte/icons/layers';
 	import Archive from '@lucide/svelte/icons/archive';
-	import ScrollText from '@lucide/svelte/icons/scroll-text';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
 	import SectionCard from '$lib/components/molecules/section-card.svelte';
@@ -24,9 +21,7 @@
 	import ConfirmDialog from '$lib/components/molecules/confirm-dialog.svelte';
 	import RelativeTime from '$lib/components/molecules/relative-time.svelte';
 	import EmptyState from '$lib/components/molecules/empty-state.svelte';
-	import Terminal, { type LogLine } from '$lib/components/organisms/terminal.svelte';
 	import { Button } from '$lib/components/atoms/ui/button';
-	import * as Select from '$lib/components/atoms/ui/select';
 	import * as Alert from '$lib/components/atoms/ui/alert';
 	import Spinner from '$lib/components/atoms/spinner.svelte';
 	import { bytes, percent, uptime } from '$lib/format';
@@ -54,28 +49,6 @@
 	let waking = $state(false);
 	let powerAction = $state('');
 
-	let tail = $state('200');
-	let service = $state('');
-	let logs = $state<LogLine[]>([]);
-	let logsLoading = $state(false);
-	let logsError = $state<string | null>(null);
-
-	const nextLogs = latest();
-	async function loadLogs() {
-		const current = nextLogs();
-		logsLoading = true;
-		logsError = null;
-		const r = await getJson<{ text: string }>(`/api/projects/${data.project.slug}/logs?${new URLSearchParams({ tail, service })}`);
-		if (!current()) return;
-		logsLoading = false;
-		if (!r.ok) {
-			logsError = r.error;
-			return;
-		}
-		const lines = (r.data.text ?? '').split('\n').filter(Boolean);
-		logs = lines.map((message, i) => ({ id: i + 1, ts: Date.now(), level: /error|exception|fatal/i.test(message) ? 'error' : /warn/i.test(message) ? 'warn' : 'info', stepKey: null, message }));
-	}
-
 	function ask(action: string, title: string, description: string) {
 		confirm = { action, title, description };
 		confirmOpen = true;
@@ -88,7 +61,6 @@
 	/** Jamais deux rafraîchissements en même temps. */
 	let inFlight = false;
 	onMount(() => {
-		if (running) void loadLogs();
 		const t = setInterval(async () => {
 			if (inFlight || document.visibilityState !== 'visible') return;
 			inFlight = true;
@@ -247,6 +219,7 @@
 		</SectionCard>
 
 		<SectionCard title="Services Docker" description="docker compose ps — {data.composePath}" icon={Layers} bodyClass="p-0">
+			{#snippet actions()}<Button href="/projects/{data.project.slug}/logs" variant="outline" size="sm">Voir les logs</Button>{/snippet}
 			{#if !svc.value}
 				<p class="flex items-center gap-2 px-5 py-6 text-sm text-muted-foreground"><Spinner /> docker compose ps…</p>
 			{:else if svc.value.error}
@@ -281,28 +254,6 @@
 			{/if}
 		</SectionCard>
 
-		<SectionCard title="Logs" description="docker compose logs --tail (lecture seule)" icon={ScrollText}>
-			{#snippet actions()}
-				<Select.Root type="single" bind:value={service}>
-					<Select.Trigger size="sm" class="min-w-32">{service || 'Tous les services'}</Select.Trigger>
-					<Select.Content>
-						<Select.Item value="" label="Tous les services">Tous les services</Select.Item>
-						{#each services as s (s.service)}<Select.Item value={s.service} label={s.service}>{s.service}</Select.Item>{/each}
-					</Select.Content>
-				</Select.Root>
-				<Select.Root type="single" bind:value={tail}>
-					<Select.Trigger size="sm">{tail} lignes</Select.Trigger>
-					<Select.Content>
-						{#each ['100', '200', '500', '1000'] as n (n)}<Select.Item value={n} label="{n} lignes">{n} lignes</Select.Item>{/each}
-					</Select.Content>
-				</Select.Root>
-				<Button variant="outline" size="sm" onclick={loadLogs} disabled={logsLoading || !running}>
-					{#if logsLoading}<Spinner />{:else}<RefreshCw />{/if} Charger
-				</Button>
-			{/snippet}
-			{#if logsError}<Alert.Root variant="destructive" class="mb-3"><Alert.Description>{logsError}</Alert.Description></Alert.Root>{/if}
-			<Terminal {logs} raw title="docker compose logs{service ? ` ${service}` : ''}" height="26rem" />
-		</SectionCard>
 
 		<SectionCard
 			title="Pare-feu Proxmox"

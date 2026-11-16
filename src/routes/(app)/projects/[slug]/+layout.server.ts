@@ -4,7 +4,7 @@ import { UserFacingError } from '$lib/domain/errors';
 import { publicProject } from '$server/application/use-cases/views';
 import type { LayoutServerLoad } from './$types';
 
-export const load: LayoutServerLoad = ({ params, depends }) => {
+export const load: LayoutServerLoad = ({ params, depends, locals }) => {
 	depends('forge:project');
 	const f = forge();
 	let p;
@@ -22,6 +22,8 @@ export const load: LayoutServerLoad = ({ params, depends }) => {
 		activeJob: active ? f.jobs.summary(active) : null,
 		/** Serveur du même dépôt dans l'autre environnement (null = « Ajouter un serveur dev » possible depuis la prod). */
 		sibling: sibling ? { slug: sibling.slug, environment: sibling.environment } : null,
-		publicIp: f.settings.get('network.publicIp')
+		publicIp: f.settings.get('network.publicIp'),
+		/** Niveau d'accès de l'utilisateur : les onglets et boutons inaccessibles sont masqués (le serveur refuse de toute façon). */
+		level: (locals.user!.role === 'admin' ? 'admin' : (f.auth.levelFor(locals.user!, p.id) ?? 'read')) as 'admin' | 'read' | 'deploy' | 'edit'
 	};
 };
