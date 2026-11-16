@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getJson, latest } from '$lib/fetch-json';
 	import { onMount } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { invalidate } from '$app/navigation';
@@ -57,17 +58,19 @@
 	let logsLoading = $state(false);
 	let logsError = $state<string | null>(null);
 
+	const nextLogs = latest();
 	async function loadLogs() {
+		const current = nextLogs();
 		logsLoading = true;
 		logsError = null;
-		const res = await fetch(`/api/projects/${data.project.slug}/logs?${new URLSearchParams({ tail, service })}`);
-		const j = await res.json();
+		const r = await getJson<{ text: string }>(`/api/projects/${data.project.slug}/logs?${new URLSearchParams({ tail, service })}`);
+		if (!current()) return;
 		logsLoading = false;
-		if (!res.ok) {
-			logsError = j.error;
+		if (!r.ok) {
+			logsError = r.error;
 			return;
 		}
-		const lines = (j.text as string).split('\n').filter(Boolean);
+		const lines = (r.data.text ?? '').split('\n').filter(Boolean);
 		logs = lines.map((message, i) => ({ id: i + 1, ts: Date.now(), level: /error|exception|fatal/i.test(message) ? 'error' : /warn/i.test(message) ? 'warn' : 'info', stepKey: null, message }));
 	}
 

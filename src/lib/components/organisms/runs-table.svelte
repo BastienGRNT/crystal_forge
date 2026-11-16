@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getJson } from '$lib/fetch-json';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
@@ -29,8 +30,9 @@
 		openId = id;
 		detail = null;
 		loading = true;
-		const res = await fetch(`/api/projects/${slug}/runs/${id}`);
-		detail = res.ok ? await res.json() : null;
+		const r = await getJson<NonNullable<typeof detail>>(`/api/projects/${slug}/runs/${id}`);
+		if (openId !== id) return;
+		detail = r.ok ? r.data : null;
 		loading = false;
 	}
 	const EVENT: Record<string, string> = { push: 'push', workflow_dispatch: 'manuel' };

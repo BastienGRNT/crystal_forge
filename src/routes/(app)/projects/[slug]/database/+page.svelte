@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getJson, latest } from '$lib/fetch-json';
 	import { enhance } from '$app/forms';
 	import { invalidate } from '$app/navigation';
 	import Database from '@lucide/svelte/icons/database';
@@ -65,19 +66,21 @@
 	let browseError = $state<string | null>(null);
 	let browse = $state<{ columns: string[]; rows: string[][] } | null>(null);
 
+	const nextBrowse = latest();
 	async function open(t: { schema: string; name: string; rows: number }, pageNo = 0) {
 		selected = t;
 		page = pageNo;
 		view = 'data';
 		browsing = true;
 		browseError = null;
-		const res = await fetch(`/api/projects/${p.slug}/db/browse?${new URLSearchParams({ schema: t.schema, table: t.name, page: String(pageNo) })}`);
-		const j = await res.json();
+		const current = nextBrowse();
+		const r = await getJson(`/api/projects/${p.slug}/db/browse?${new URLSearchParams({ schema: t.schema, table: t.name, page: String(pageNo) })}`);
+		if (!current()) return;
 		browsing = false;
-		if (!res.ok) {
-			browseError = j.error;
+		if (!r.ok) {
+			browseError = r.error;
 			browse = null;
-		} else browse = j;
+		} else browse = r.data as typeof browse;
 	}
 
 	// --- Console SQL ----------------------------------------------------------------------

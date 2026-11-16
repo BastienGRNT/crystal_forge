@@ -1,14 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { invalidate } from '$app/navigation';
+	import { coalesce, onJobChange } from '$lib/live.svelte';
 	import PageHeader from '$lib/components/molecules/page-header.svelte';
 	import JobList from '$lib/components/organisms/job-list.svelte';
 
 	let { data } = $props();
-	onMount(() => {
-		const t = setInterval(() => void invalidate('forge:jobs'), 4000);
-		return () => clearInterval(t);
-	});
+	// Temps réel : la liste se recharge à chaque changement de statut d'un job.
+	onJobChange(coalesce(() => invalidate('forge:jobs')));
 </script>
 
 <svelte:head><title>Jobs · Forge</title></svelte:head>

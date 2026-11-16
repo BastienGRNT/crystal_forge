@@ -3,7 +3,8 @@ import { visibleProjects } from '$server/access';
 import { publicProject } from '$server/application/use-cases/views';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = ({ locals }) => {
+export const load: PageServerLoad = ({ locals, depends }) => {
+	depends('forge:projects');
 	const f = forge();
 	return {
 		projects: visibleProjects(f, locals.user!).map((p) => ({

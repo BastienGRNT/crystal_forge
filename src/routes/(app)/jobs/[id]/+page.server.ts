@@ -9,7 +9,7 @@ export const load: PageServerLoad = ({ params }) => {
 	const job = f.jobs.view(id);
 	if (!job) error(404, 'Job introuvable');
 	// Seules les dernières lignes sont affichées : un journal de plusieurs milliers de lignes fait planter la page.
-	return { job, logs: f.repos.jobs.logs(id).slice(-1500) };
+	return { job, logs: f.repos.jobs.logs(id).slice(-1500), loadedAt: Date.now() };
 };
 
 function act(fn: (id: number) => unknown) {

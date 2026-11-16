@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { invalidate } from '$app/navigation';
+	import { coalesce, onJobChange } from '$lib/live.svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -35,6 +36,7 @@
 		await reload();
 		refreshing = false;
 	}
+	onJobChange(coalesce(reload, 1000));
 	onMount(() => {
 		const t = setInterval(() => {
 			if (document.visibilityState === 'visible') void reload();

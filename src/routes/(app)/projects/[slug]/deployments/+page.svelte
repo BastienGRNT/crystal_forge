@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { onMount } from 'svelte';
 	import { invalidate } from '$app/navigation';
+	import { coalesce, onJobChange } from '$lib/live.svelte';
 	import { toast } from 'svelte-sonner';
 	import Rocket from '@lucide/svelte/icons/rocket';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
@@ -15,6 +16,11 @@
 	import Spinner from '$lib/components/atoms/spinner.svelte';
 
 	let { data } = $props();
+	// Un job de ce projet change de statut (lancé ici, ailleurs ou automatiquement) : on recharge.
+	const reloadRuns = coalesce(() => invalidate('forge:runs'));
+	onJobChange((e) => {
+		if (e.slug === data.project.slug) reloadRuns();
+	});
 	let pending = $state(false);
 	onMount(() => {
 		const t = setInterval(() => {

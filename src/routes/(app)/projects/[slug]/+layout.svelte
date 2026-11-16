@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { invalidate } from '$app/navigation';
+	import { coalesce, onJobChange } from '$lib/live.svelte';
 	import Rocket from '@lucide/svelte/icons/rocket';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Globe from '@lucide/svelte/icons/globe';
@@ -9,6 +10,7 @@
 	import Settings from '@lucide/svelte/icons/settings';
 	import Database from '@lucide/svelte/icons/database';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 	import PageHeader from '$lib/components/molecules/page-header.svelte';
 	import StatusBadge from '$lib/components/molecules/status-badge.svelte';
@@ -31,6 +33,10 @@
 		{ href: `${base}/settings`, label: 'Paramètres', icon: Settings }
 	]);
 
+	const reloadProject = coalesce(() => invalidate('forge:project'));
+	onJobChange((e) => {
+		if (e.slug === p.slug) reloadProject();
+	});
 	onMount(() => {
 		const t = setInterval(() => {
 			if (data.activeJob) void invalidate('forge:project');
@@ -69,16 +75,20 @@
 </PageHeader>
 
 {#if data.activeJob}
+	{@const waiting = data.activeJob.status === 'awaiting_input'}
 	<a
 		href="/jobs/{data.activeJob.id}"
-		class="mb-6 flex items-center gap-3 rounded-xl border border-info/30 bg-info/5 px-4 py-3 text-sm transition-colors hover:bg-info/10"
+		class={cn(
+			'mb-6 flex items-center gap-3 rounded-xl border px-4 py-3 text-sm transition-colors',
+			waiting ? 'border-warning/40 bg-warning/5 hover:bg-warning/10' : 'border-info/30 bg-info/5 hover:bg-info/10'
+		)}
 	>
-		<Spinner class="text-info" />
+		{#if waiting}<CircleAlert class="size-4 text-warning" />{:else}<Spinner class="text-info" />{/if}
 		<span class="min-w-0 flex-1 truncate">
 			<span class="font-medium">{data.activeJob.label}</span>
-			<span class="text-muted-foreground"> — {data.activeJob.currentStep ?? 'en file'} </span>
+			<span class="text-muted-foreground"> — {waiting ? 'Forge attend votre confirmation' : (data.activeJob.currentStep ?? 'en file')} </span>
 		</span>
-		<StatusBadge status={data.activeJob.status} />
+		{#if waiting}<span class="font-medium text-warning">Confirmer</span>{:else}<StatusBadge status={data.activeJob.status} />{/if}
 		<ArrowRight class="size-4 text-muted-foreground" />
 	</a>
 {/if}
@@ -100,4 +110,7 @@
 	{/each}
 </nav>
 
-{@render children()}
+<!-- Changer de projet recrée les onglets : aucun état local (variables, taille, base…) ne passe d'un projet à l'autre. -->
+{#key p.slug}
+	{@render children()}
+{/key}

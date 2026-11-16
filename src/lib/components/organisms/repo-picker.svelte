@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getJson } from '$lib/fetch-json';
 	import { onMount } from 'svelte';
 	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
 	import Lock from '@lucide/svelte/icons/lock';
@@ -20,10 +21,9 @@
 	async function load(refresh = false) {
 		loading = true;
 		error = null;
-		const res = await fetch(`/api/github/repos${refresh ? '?refresh=1' : ''}`);
-		const j = (await res.json()) as { repos: GhRepo[]; error?: string };
-		repos = j.repos;
-		error = j.error ?? null;
+		const r = await getJson<{ repos: GhRepo[]; error?: string }>(`/api/github/repos${refresh ? '?refresh=1' : ''}`);
+		repos = r.data?.repos ?? (r.ok ? [] : repos);
+		error = r.ok ? (r.data.error ?? null) : r.error;
 		loading = false;
 	}
 	onMount(() => void load());

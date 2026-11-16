@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { invalidate } from '$app/navigation';
+	import { coalesce, onJobChange } from '$lib/live.svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Boxes from '@lucide/svelte/icons/boxes';
 	import Globe from '@lucide/svelte/icons/globe';
@@ -13,6 +15,7 @@
 	import { Badge } from '$lib/components/atoms/ui/badge';
 
 	let { data } = $props();
+	onJobChange(coalesce(() => invalidate('forge:projects')));
 </script>
 
 <svelte:head><title>Projets · Forge</title></svelte:head>

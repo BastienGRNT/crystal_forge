@@ -37,7 +37,7 @@ const ANY: Requirement = { kind: 'any' };
 const ADMIN: Requirement = { kind: 'admin' };
 
 /** Pages accessibles à tout utilisateur connecté (les listes sont filtrées côté serveur). */
-const OPEN_PAGES = new Set(['/projects', '/jobs', '/logout', '/account']);
+const OPEN_PAGES = new Set(['/projects', '/jobs', '/logout', '/account', '/api/events']);
 
 /** Niveau exigé par un onglet de projet, pour les actions de formulaire (nom après « ?/ »). */
 const TAB_ACTIONS: Record<string, Record<string, AccessLevel | 'admin'>> = {

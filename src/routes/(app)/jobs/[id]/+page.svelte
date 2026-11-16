@@ -1,9 +1,9 @@
 <script lang="ts">
 	import DiffView from '$lib/components/molecules/diff-view.svelte';
 	import { lineDiff } from '$lib/domain/diff';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { enhance, applyAction, deserialize } from '$app/forms';
-	import { goto, invalidate } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Undo2 from '@lucide/svelte/icons/undo-2';
@@ -33,9 +33,30 @@
 
 	let { data } = $props();
 
-	// Valeurs dérivées des données de la page, puis mises à jour en direct par le flux SSE.
-	let job = $derived(data.job);
-	let logs = $derived<LogLine[]>(data.logs);
+	const TERMINAL = ['succeeded', 'failed', 'cancelled', 'rolled_back'];
+
+	// État local alimenté par le chargement de la page PUIS par le flux SSE. On ne reprend
+	// data.job que si la page a vraiment été rechargée (autre job, ou rechargement serveur) :
+	// un simple invalidate de la barre latérale ne doit pas ramener l'instantané d'origine.
+	let job = $state(untrack(() => data.job));
+	let logs = $state<LogLine[]>(untrack(() => data.logs));
+	let loadedAt = untrack(() => data.loadedAt);
+	let streaming = $state(untrack(() => !TERMINAL.includes(data.job.status)));
+	$effect.pre(() => {
+		const d = data;
+		if (d.loadedAt === loadedAt) return;
+		loadedAt = d.loadedAt;
+		untrack(() => {
+			if (d.job.id !== job.id) logs = d.logs;
+			else {
+				const known = new Set(d.logs.map((l) => l.id));
+				logs = [...d.logs, ...logs.filter((l) => !known.has(l.id) && l.id > (d.logs.at(-1)?.id ?? 0))];
+			}
+			job = d.job;
+			streaming = !TERMINAL.includes(d.job.status);
+		});
+	});
+
 	let filter = $state<string | null>(null);
 	let now = $state(Date.now());
 	let rollbackOpen = $state(false);
@@ -48,47 +69,64 @@
 
 	onMount(() => {
 		const tick = setInterval(() => (now = Date.now()), 1000);
-		let es: EventSource | null = null;
-		const connect = () => {
-			const after = logs.at(-1)?.id ?? 0;
-			es = new EventSource(`/api/jobs/${data.job.id}/events?after=${after}`);
-			es.addEventListener('log', (e) => {
-				const l = JSON.parse((e as MessageEvent).data) as LogLine;
-				if (!logs.some((x) => x.id === l.id)) logs = [...logs, l];
-			});
-			es.addEventListener('job', (e) => {
-				const prev = job.status;
-				job = JSON.parse((e as MessageEvent).data);
-				if (prev !== job.status) {
-					if (job.status === 'succeeded') toast.success(`${job.label} terminé`);
-					if (job.status === 'rolled_back') toast.success('Rollback terminé');
-					if (job.status === 'failed') toast.error(`${job.label} : échec`, { description: job.error ?? undefined });
-					if (job.status === 'awaiting_input') toast.warning('Confirmation requise');
-					void invalidate('forge:shell');
-				}
-			});
-		};
-		connect();
+		return () => clearInterval(tick);
+	});
+
+	// Flux SSE du job affiché : rouvert quand on passe à un autre job (ex. après un rollback),
+	// fermé peu après un statut final (il ne bloque plus les connexions du navigateur).
+	$effect(() => {
+		const id = job.id;
+		if (!streaming) return;
+		const after = untrack(() => logs.at(-1)?.id ?? 0);
+		const es = new EventSource(`/api/jobs/${id}/events?after=${after}`);
+		let closeTimer: ReturnType<typeof setTimeout> | null = null;
+		es.addEventListener('log', (e) => {
+			const l = JSON.parse((e as MessageEvent).data) as LogLine;
+			if (!logs.some((x) => x.id === l.id)) logs = [...logs, l];
+		});
+		es.addEventListener('job', (e) => {
+			const next = JSON.parse((e as MessageEvent).data);
+			if (next.id !== id) return;
+			const prev = job.status;
+			job = next;
+			if (prev !== job.status) {
+				if (job.status === 'succeeded') toast.success(`${job.label} terminé`);
+				if (job.status === 'rolled_back') toast.success('Rollback terminé');
+				if (job.status === 'failed') toast.error(`${job.label} : échec`, { description: job.error ?? undefined });
+				if (job.status === 'awaiting_input') toast.warning('Confirmation requise');
+			}
+			// Dernières lignes de journal éventuelles, puis fermeture.
+			if (TERMINAL.includes(job.status) && !closeTimer) closeTimer = setTimeout(() => (streaming = false), 2000);
+		});
 		return () => {
-			clearInterval(tick);
-			es?.close();
+			if (closeTimer) clearTimeout(closeTimer);
+			es.close();
 		};
 	});
 
 	async function post(action: string, body: Record<string, string> = {}) {
 		busy = action;
-		const fd = new FormData();
-		for (const [k, v] of Object.entries(body)) fd.set(k, v);
-		const res = await fetch(`?/${action}`, { method: 'POST', body: fd, headers: { 'x-sveltekit-action': 'true' } });
-		const result = deserialize(await res.text());
-		busy = null;
-		if (result.type === 'failure') {
-			toast.error((result.data as { error?: string })?.error ?? 'Action impossible');
+		try {
+			const fd = new FormData();
+			for (const [k, v] of Object.entries(body)) fd.set(k, v);
+			const res = await fetch(`?/${action}`, { method: 'POST', body: fd, headers: { 'x-sveltekit-action': 'true' } });
+			const result = deserialize(await res.text());
+			if (result.type === 'failure') {
+				toast.error((result.data as { error?: string })?.error ?? 'Action impossible');
+				return null;
+			}
+			if (result.type === 'success') {
+				await invalidateAll();
+				return result.data as Record<string, unknown>;
+			}
+			await applyAction(result);
 			return null;
+		} catch {
+			toast.error('Forge ne répond pas : réessayez dans un instant.');
+			return null;
+		} finally {
+			busy = null;
 		}
-		if (result.type === 'success') return result.data as Record<string, unknown>;
-		await applyAction(result);
-		return null;
 	}
 
 	async function rollback() {

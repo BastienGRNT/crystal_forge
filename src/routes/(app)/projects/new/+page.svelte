@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getJson, latest } from '$lib/fetch-json';
 	import { onMount, untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import Rocket from '@lucide/svelte/icons/rocket';
@@ -67,20 +68,23 @@
 	let submitting = $state(false);
 	let preview = $state<{ ctid: number | null; ip: string | null; freeIps: number; ram: { freeMb: number }; memTotalMb: number; committedMb?: number } | null>(null);
 
+	// Le dépôt A peut répondre après le dépôt B : seule la dernière analyse remplit le formulaire.
+	const nextInspect = latest();
 	async function inspect(full: string, dir: string) {
+		const current = nextInspect();
 		inspecting = true;
 		inspectError = null;
 		const q = new URLSearchParams({ repo: full, workdir: dir });
 		if (environment === 'development' && branch.trim()) q.set('branch', branch.trim());
-		const res = await fetch(`/api/github/inspect?${q}`);
-		const j = await res.json();
+		const r = await getJson<RepoInspection>(`/api/github/inspect?${q}`);
+		if (!current()) return;
 		inspecting = false;
-		if (!res.ok) {
-			inspectError = j.error;
+		if (!r.ok) {
+			inspectError = r.error;
 			inspection = null;
 			return;
 		}
-		inspection = j as RepoInspection;
+		inspection = r.data;
 		const runnable = inspection.compose?.services.filter((x) => !x.db && !inspection?.compose?.migrationServices.some((m) => m.service === x.name)).map((x) => x.name) ?? inspection.composeServices;
 		if (inspection.composeServices.length && !inspection.composeServices.includes(appService)) {
 			appService = runnable.includes('app') ? 'app' : (runnable[0] ?? inspection.composeServices[0] ?? 'app');
@@ -114,13 +118,13 @@
 		if (repo) void inspect(repo, workdir);
 	}
 
+	const nextPreview = latest();
 	$effect(() => {
 		const s = size;
-		void fetch(`/api/wizard/preview?size=${s}`)
-			.then((r) => r.json())
-			.then((j) => {
-				if (!j.error) preview = j;
-			});
+		const current = nextPreview();
+		void getJson<NonNullable<typeof preview>>(`/api/wizard/preview?size=${s}`).then((r) => {
+			if (r.ok && current()) preview = r.data;
+		});
 	});
 
 	const ram = $derived(preview ? assessHostRam(preview.memTotalMb, preview.memTotalMb - preview.ram.freeMb, SIZES[size], preview.committedMb) : null);

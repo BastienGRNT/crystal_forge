@@ -38,7 +38,7 @@ export class JobEngine {
 				if (step.status === 'running') this.s.repos.jobs.setStep(step.id, 'failed', { error: 'Interrompu par un redémarrage de Forge' });
 			}
 			this.s.repos.jobs.setStatus(job.id, 'failed', { error: 'Interrompu par un redémarrage de Forge — vous pouvez reprendre.' });
-			this.s.repos.jobs.addLog(job.id, null, 'warn', 'Forge a redémarré pendant ce job : il est marqué en échec, « Reprendre » le relance là où il en était.');
+			this.#log(job.id, null, 'warn', 'Forge a redémarré pendant ce job : il est marqué en échec, « Reprendre » le relance là où il en était.');
 		}
 		void this.#loop();
 	}
@@ -68,7 +68,7 @@ export class JobEngine {
 			params,
 			steps: def.steps(params)
 		});
-		this.s.repos.jobs.addLog(job.id, null, 'info', `Job « ${def.label} » créé${job.dryRun ? ' en mode DRY-RUN (aucune écriture réelle)' : ''}.`);
+		this.#log(job.id, null, 'info', `Job « ${def.label} » créé${job.dryRun ? ' en mode DRY-RUN (aucune écriture réelle)' : ''}.`);
 		this.#emitStatus(job.id);
 		this.#kick();
 		return job;
@@ -84,7 +84,7 @@ export class JobEngine {
 			if (step.status === 'failed' || step.status === 'running') this.s.repos.jobs.setStep(step.id, 'pending', { error: null });
 		}
 		this.s.repos.jobs.setStatus(jobId, 'queued', { error: null });
-		this.s.repos.jobs.addLog(jobId, null, 'info', 'Reprise demandée.');
+		this.#log(jobId, null, 'info', 'Reprise demandée.');
 		this.#emitStatus(jobId);
 		this.#kick();
 	}
@@ -98,7 +98,7 @@ export class JobEngine {
 		this.s.repos.jobs.updateParams(jobId, params);
 		for (const step of job.steps) if (step.status === 'awaiting_input') this.s.repos.jobs.setStep(step.id, 'pending');
 		this.s.repos.jobs.setStatus(jobId, 'queued');
-		this.s.repos.jobs.addLog(jobId, null, 'info', `Confirmation reçue (${key}).`);
+		this.#log(jobId, null, 'info', `Confirmation reçue (${key}).`);
 		this.#emitStatus(jobId);
 		this.#kick();
 	}
@@ -120,7 +120,7 @@ export class JobEngine {
 		const job = this.#mustGet(jobId);
 		if (!['failed', 'awaiting_input'].includes(job.status)) throw new Error('Seul un job en échec ou en attente peut être annulé.');
 		this.s.repos.jobs.setStatus(jobId, 'cancelled', { error: job.error ?? 'Annulé par l’utilisateur' });
-		this.s.repos.jobs.addLog(jobId, null, 'warn', 'Job annulé : rollback des ressources créées par ce job.');
+		this.#log(jobId, null, 'warn', 'Job annulé : rollback des ressources créées par ce job.');
 		this.#emitStatus(jobId);
 		return this.enqueue({ type: 'rollback', projectId: job.projectId, params: { targetJobId: jobId }, dryRun: job.dryRun });
 	}

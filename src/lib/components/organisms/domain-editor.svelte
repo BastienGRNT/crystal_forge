@@ -8,6 +8,7 @@
 </script>
 
 <script lang="ts">
+	import { getJson } from '$lib/fetch-json';
 	import Plus from '@lucide/svelte/icons/plus';
 	import X from '@lucide/svelte/icons/x';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
@@ -39,8 +40,11 @@
 			row.id,
 			setTimeout(async () => {
 				const qs = new URLSearchParams({ sub: row.subdomain, zone: row.zone, managed: row.custom ? '0' : '1' });
-				const res = await fetch(`/api/wizard/domain?${qs}`);
-				checks[row.id] = { loading: false, ...(await res.json()) };
+				const key = qs.toString();
+				const r = await getJson<Omit<Check, 'loading'>>(`/api/wizard/domain?${qs}`);
+				// Saisie modifiée entre-temps : ce résultat est périmé.
+				if (new URLSearchParams({ sub: row.subdomain, zone: row.zone, managed: row.custom ? '0' : '1' }).toString() !== key) return;
+				checks[row.id] = r.ok ? { loading: false, ...r.data } : { loading: false, ok: false, reasons: [r.error] };
 			}, 450)
 		);
 	}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Spinner from '$lib/components/atoms/spinner.svelte';
 	import { enhance } from '$app/forms';
 	import Settings2 from '@lucide/svelte/icons/settings-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -31,6 +32,11 @@
 	const p = $derived(data.project);
 	let redeploy = $state(true);
 	let deleteOpen = $state(false);
+	let deleting = $state(false);
+	let deleteError = $state<string | null>(null);
+	$effect(() => {
+		if (!deleteOpen) deleteError = null;
+	});
 	let mode = $state<'full' | 'forget'>('full');
 	let typed = $state('');
 </script>
@@ -195,7 +201,21 @@
 			<AlertDialog.Title>Supprimer « {p.name} » ?</AlertDialog.Title>
 			<AlertDialog.Description>Choisissez ce qui doit être supprimé.</AlertDialog.Description>
 		</AlertDialog.Header>
-		<form method="POST" action="?/delete" use:enhance class="space-y-4">
+		<form
+			method="POST"
+			action="?/delete"
+			use:enhance={() => {
+				deleting = true;
+				return async ({ result, update }) => {
+					deleting = false;
+					// Un refus s'affiche DANS la boîte (sinon il resterait caché derrière).
+					if (result.type === 'failure') deleteError = (result.data as { error?: string } | undefined)?.error ?? 'Suppression refusée.';
+					else await update();
+				};
+			}}
+			class="space-y-4"
+		>
+			{#if deleteError}<Alert.Root variant="destructive"><Alert.Description class="whitespace-pre-line">{deleteError}</Alert.Description></Alert.Root>{/if}
 			<input type="hidden" name="mode" value={mode} />
 			<div class="grid gap-2" role="radiogroup">
 				<button
@@ -231,7 +251,7 @@
 			</div>
 			<AlertDialog.Footer>
 				<AlertDialog.Cancel type="button">Annuler</AlertDialog.Cancel>
-				<Button type="submit" variant="destructive" disabled={typed.trim() !== p.slug}><Trash2 /> {mode === 'full' ? 'Sauvegarder puis supprimer' : 'Retirer de Forge'}</Button>
+				<Button type="submit" variant="destructive" disabled={typed.trim() !== p.slug || deleting}>{#if deleting}<Spinner />{:else}<Trash2 />{/if} {mode === 'full' ? 'Sauvegarder puis supprimer' : 'Retirer de Forge'}</Button>
 			</AlertDialog.Footer>
 		</form>
 	</AlertDialog.Content>
