@@ -80,7 +80,12 @@ export async function builderDeploy(ctx: StepContext): Promise<void> {
 	if (built.length) {
 		markBuilderUse(1);
 		try {
-			const b = await ensureBuilder(ctx.services, (l, m) => ctx.log(l, m), ctx.dryRun);
+			// Le CT de build ne doit jamais bloquer un déploiement : en cas d'échec, on construit dans le CT.
+			const b = await ensureBuilder(ctx.services, (l, m) => ctx.log(l, m), ctx.dryRun).catch((err) => {
+				ctx.log('warn', `CT de build indisponible : ${err instanceof Error ? err.message : err}`);
+				ctx.log('warn', 'Construction dans le CT du projet à la place (une image à la fois).');
+				return null;
+			});
 			if (b) {
 				const bdir = buildDir(p.slug);
 				const bwd = workdir === '.' ? bdir : `${bdir}/${workdir}`;

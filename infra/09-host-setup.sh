@@ -65,6 +65,14 @@ grep -qs "^vm.swappiness = $SWAPPINESS$" /etc/sysctl.d/90-forge.conf || todo_swa
 pvesm status --storage "$BK_STORAGE" >/dev/null 2>&1 || todo_storage=1
 grep -qsx "tmpdir: $BK_TMP" /etc/vzdump.conf || todo_tmpdir=1
 if [[ -n "$ZFS_POOL" ]] && ! pvesm status --storage "$ZFS_STORAGE" >/dev/null 2>&1; then todo_zfs=1; fi
+# Le dataset doit avoir un point de montage : sans lui (pool « data » en mountpoint=none),
+# Proxmox crée le disque mais ne peut pas le monter (« no mountpoint set ») et le clonage échoue.
+todo_zfs_mount=0
+ZFS_MOUNT="/$ZFS_DATASET"
+if [[ -n "$ZFS_POOL" ]] && zfs list -H -o name "$ZFS_DATASET" >/dev/null 2>&1; then
+	case "$(zfs get -H -o value mountpoint "$ZFS_DATASET")" in none | legacy | -) todo_zfs_mount=1 ;; esac
+	[[ "$(zfs get -H -o value mounted "$ZFS_DATASET")" == yes ]] || todo_zfs_mount=1
+fi
 # Jobs forge-* à migrer : « id<TAB>a_un_tmpdir », pour ceux qui ne sont pas sur forge-backups ou ont un tmpdir.
 mapfile -t jobs_to_migrate < <(pvesh get /cluster/backup --output-format json | perl -MJSON::PP -e '
 	local $/; for (@{decode_json(<STDIN>)}) {
@@ -73,7 +81,7 @@ mapfile -t jobs_to_migrate < <(pvesh get /cluster/backup --output-format json | 
 	}' "$BK_STORAGE")
 
 title "Réglages de l'hôte"
-if (( todo_arc + todo_swap + todo_storage + todo_tmpdir + todo_zfs + todo_zram + ${#mem_low_todo[@]} + ${#jobs_to_migrate[@]} == 0 )); then
+if (( todo_arc + todo_swap + todo_storage + todo_tmpdir + todo_zfs + todo_zfs_mount + todo_zram + ${#mem_low_todo[@]} + ${#jobs_to_migrate[@]} == 0 )); then
 	ok "Tout est déjà en place : rien à faire."
 	exit 0
 fi
@@ -81,6 +89,7 @@ fi
 (( todo_swap )) && plan "vm.swappiness = $SWAPPINESS (à chaud + /etc/sysctl.d/90-forge.conf)"
 (( todo_storage )) && plan "Créer le stockage « $BK_STORAGE » ($BK_PATH, contenu : sauvegardes)"
 (( todo_zfs )) && plan "Créer le stockage ZFS « $ZFS_STORAGE » (dataset $ZFS_DATASET, disques des CT)"
+(( todo_zfs_mount )) && plan "Donner un point de montage au dataset $ZFS_DATASET ($ZFS_MOUNT) : sans lui, les CT ne peuvent pas être créés sur ZFS"
 (( todo_zram )) && plan "zram : swap compressé en RAM (zram-tools, zstd, 25 % de la RAM, prioritaire sur le swap disque)"
 for e in "${mem_low_todo[@]}"; do plan "CT ${e%%:*} : mémoire protégée $(( ${e##*:} / 1048576 )) Mo (lxc.cgroup2.memory.low, à chaud, sans redémarrage)"; done
 (( todo_tmpdir )) && plan "/etc/vzdump.conf : tmpdir: $BK_TMP"
@@ -128,9 +137,18 @@ if (( todo_tmpdir )); then
 fi
 
 if (( todo_zfs )); then
-	zfs list -H -o name "$ZFS_DATASET" >/dev/null 2>&1 || run zfs create "$ZFS_DATASET"
+	zfs list -H -o name "$ZFS_DATASET" >/dev/null 2>&1 || run zfs create -o mountpoint="$ZFS_MOUNT" "$ZFS_DATASET"
 	run pvesm add zfspool "$ZFS_STORAGE" --pool "$ZFS_DATASET" --content rootdir --sparse 1
 	ok "Stockage ZFS « $ZFS_STORAGE » créé : Forge y mettra les nouveaux CT."
+fi
+
+if (( todo_zfs_mount )); then
+	if [[ -e "$ZFS_MOUNT" ]] && [[ -n "$(ls -A "$ZFS_MOUNT" 2>/dev/null)" ]] && ! mountpoint -q "$ZFS_MOUNT"; then
+		warn "$ZFS_MOUNT existe déjà et n'est pas vide : point de montage non modifié. Videz-le ou choisissez un autre chemin."
+	else
+		run zfs set mountpoint="$ZFS_MOUNT" "$ZFS_DATASET"
+		ok "Dataset $ZFS_DATASET monté sur $ZFS_MOUNT : les CT peuvent être créés sur « $ZFS_STORAGE »."
+	fi
 fi
 
 if (( todo_zram )); then

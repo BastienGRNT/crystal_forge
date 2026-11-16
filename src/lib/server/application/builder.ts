@@ -108,7 +108,15 @@ export async function ensureBuilder(s: ForgeServices, log: Log, dryRun: boolean)
 		const upid = await proxmox.cloneTemplate(ctid, BUILDER_HOSTNAME, 'CT de build de Forge : construit les images Docker des projets, puis s’éteint.\nGéré par Forge : ne pas modifier à la main.');
 		// Sans projet ni job : supprimer un projet ou annuler un job ne touche jamais au CT de build.
 		if (!dryRun) repos.resources.record({ type: 'pve_ct', externalId: ctid, projectId: null, jobId: null, meta: { hostname: BUILDER_HOSTNAME, ip, builder: true } });
-		await proxmox.waitTask(upid, { timeoutMs: 15 * 60_000 });
+		try {
+			await proxmox.waitTask(upid, { timeoutMs: 15 * 60_000 });
+		} catch (err) {
+			const msg = errorMessage(err);
+			if (/no mountpoint set/i.test(msg)) {
+				throw new Error(`Le stockage ZFS « forge-ct » n'a pas de point de montage sur l'hôte : relancez bash infra/bootstrap.sh (il le règle), puis relancez ce job. (${msg})`);
+			}
+			throw err;
+		}
 
 		const nameserver = settings.get('network.nameserver').trim();
 		await proxmox.configure(ctid, {
